@@ -6,7 +6,7 @@ import { DiamondProxyResolver } from '../src/proxies.js';
 import { disasm } from '../src/disasm.js';
 import { withCache } from "../src/internal/filecache.js";
 import { opcodes } from "../src/opcodes.js";
-import { CompatibleProvider } from "../src/types.js";
+import { CompatibleProvider } from "../src/providers.js";
 
 const { INFURA_API_KEY } = process.env;
 const provider = CompatibleProvider(INFURA_API_KEY ? (new ethers.InfuraProvider("homestead", INFURA_API_KEY)) : ethers.getDefaultProvider("homestead"));
@@ -33,8 +33,10 @@ async function main() {
         }
     }
 
+    console.log("Detected proxies: ", program.proxies);
+
     for (const resolver of program.proxies) {
-        console.log("Proxy found:", resolver.toString());
+        console.log("Resolving proxy:", resolver.toString());
 
         if (!selector && resolver instanceof DiamondProxyResolver) {
             const facets = await (resolver as DiamondProxyResolver).facets(provider, address);

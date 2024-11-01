@@ -1,6 +1,6 @@
 import { expect, describe, test } from 'vitest';
 
-import { cached_test, online_test } from './env';
+import { cached_test, online_test, makeProvider } from './env';
 
 import { disasm } from '../disasm';
 import { addSlotOffset, readArray, joinSlot } from "../slots.js";
@@ -13,12 +13,15 @@ import { ZEPPELINOS_USDC, WANDERWING } from './__fixtures__/proxies'
 describe('proxy detection', () => {
     test('Minimal Proxy Pattern', async () => {
         // https://eips.ethereum.org/EIPS/eip-1167
+        // includes deploy instructions
         const bytecode = "0x3d602d80600a3d3981f3363d3d373d3d3d363d73bebebebebebebebebebebebebebebebebebebebe5af43d82803e903d91602b57fd5bf3";
 
         const program = disasm(bytecode);
         expect(program.proxies[0]).toBeInstanceOf(proxies.FixedProxyResolver);
         const proxy = program.proxies[0] as proxies.FixedProxyResolver;
         expect(proxy.resolvedAddress).toBe("0xbebebebebebebebebebebebebebebebebebebebe");
+        expect(proxy.name).toBe("FixedProxy");
+        expect(proxy.toString()).toBe("FixedProxy");
     });
 
     test('EIP-1167 Proxy: Uniswap v1', async () => {
@@ -55,6 +58,7 @@ describe('proxy detection', () => {
 
         const program = disasm(bytecode);
         expect(program.proxies[0]).toBeInstanceOf(proxies.GnosisSafeProxyResolver);
+        expect(program.proxies[0].name).toBe("GnosisSafeProxy");
     });
 
     test('ZeppelinOS Proxy', async () => {
@@ -122,6 +126,25 @@ describe('known proxy resolving', () => {
     // FIXME: Is there one on mainnet? Seems they're all on polygon
     //online_test('SequenceWallet Proxy', async() => {
     //});
+
+    cached_test('LayerrProxy on Sepolia', async({ withCache }) => {
+        // For issue #139: https://github.com/shazow/whatsabi/issues/139
+        const provider = makeProvider("https://ethereum-sepolia-rpc.publicnode.com");
+        const address = "0x2f4eeccbe817e2b9f66e8123387aa81bae08dfec";
+        const code = await withCache(
+            `${address}_code`,
+            async () => {
+                return await provider.getCode(address)
+            },
+        );
+
+        const program = disasm(code);
+        const resolver = program.proxies[0];
+        const got = await resolver.resolve(provider, address);
+        const wantImplementation = "0x0000000000f7a60f1c88f317f369e3d8679c6689";
+
+        expect(got).toEqual(wantImplementation);
+    });
 });
 
 
@@ -196,4 +219,21 @@ describe('proxy internal slot reading', () => {
         const got = await readArray(provider, address, facetToSelectorSlot, selectorWidth);
         expect(got.length).to.not.equal(0);
     });
+});
+
+
+describe('multiple proxy resolving', () => {
+    cached_test('resolve WeightedRateSetCollectionPool', async ({ withCache, provider }) => {
+        const address = "0x56C5Aef1296d004707475c8440f540DdA409b53D";
+        const code = await withCache(
+            `${address}_code`,
+            async () => {
+                return await provider.getCode(address)
+            },
+        );
+        const program = disasm(code);
+
+        expect(program.proxies.length).to.be.equal(4);
+    });
+
 });

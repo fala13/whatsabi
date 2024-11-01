@@ -24,7 +24,7 @@ WhatsABI is perfect for building procedural frontends, embedding in wallets, blo
 
 ## Usage
 
-Generated docs: https://tsdocs.dev/docs/@shazow/whatsabi
+Generated docs: https://shazow.github.io/whatsabi/
 
 Quick start:
 
@@ -32,7 +32,8 @@ Quick start:
 import { ethers } from "ethers";
 import { whatsabi } from "@shazow/whatsabi";
 
-const provider = ethers.getDefaultProvider(); // substitute with your fav provider
+// Works with any provider (or client) library like Ethers.js, Viem, or Web3.js!
+const provider = ethers.getDefaultProvider();
 const address = "0x00000000006c3852cbEf3e08E8dF289169EdE581"; // Or your fav contract address
 
 // Quick-start:
@@ -42,7 +43,19 @@ console.log(result.abi);
 // -> [ ... ]
 ```
 
-Breaking it down:
+Another quick example with Viem:
+
+```typescript
+import { createPublicClient, http } from 'viem'
+import { mainnet } from 'viem/chains'
+import { whatsabi } from "@shazow/whatsabi";
+ 
+const client = createPublicClient({ chain: mainnet, transport: http() })
+const result = await whatsabi.autoload(address, { provider: client });
+```
+
+
+Breaking it down, here's what autoload is doing on the inside:
 
 ```typescript
 const code = await provider.getCode(address); // Load the bytecode
@@ -83,6 +96,8 @@ const loader = new whatsabi.loaders.MultiABILoader([
 ]);
 const { abi, name, /* ... other metadata */ } = await loader.getContract(address));
 ```
+
+See [whatsabi.loaders](https://shazow.github.io/whatsabi/modules/whatsabi.loaders.html) for more examples of what our loaders can do, like loading verified contract source code and compiler settings.
 
 All together with our do-all-the-things helper:
 
@@ -151,12 +166,21 @@ console.log("Resolved to:", address);
 
 ## See Also
 
-* [callthis.link](https://callthis.link/) - Transaction builder powered by whatsabi
-* [WhatsABI? - Seminar for Spearbit](https://www.youtube.com/watch?v=sfgassm8SKw) (April 2023)
-* [abi.w1nt3r.xyz](https://abi.w1nt3r.xyz/) - A frontend for whatsabi by [@w1nt3r_eth](https://twitter.com/w1nt3r_eth) - https://github.com/w1nt3r-eth/abi.w1nt3r.xyz
+### Projects powered by WhatsABI
+
+* [callthis.link](https://callthis.link/) - Transaction builder powered by WhatsABI
+* [otterscan.io](https://otterscan.io/) - Open source block explorer, [contract interactions powered by WhatsABI](https://x.com/otterscan/status/1817261257994756569)
+* [abi.w1nt3r.xyz](https://abi.w1nt3r.xyz/) - A frontend for whatsabi by [@w1nt3r_eth](https://twitter.com/w1nt3r_eth)
 * [ethcmd.com](https://www.ethcmd.com/) - Contract explorer frontend, [uses whatsabi for unverified contracts](https://github.com/verynifty/ethcmd)
 * [monobase.xyz](https://monobase.xyz) - Universal frontend, [uses whatsabi for unverified contracts](https://twitter.com/nazar_ilamanov/status/1659648915195707392)
-* [savvy](https://svvy.sh/) - Contract explorer that uses whatsabi to fetch ABIs and execute against an in-browser devnet, built by [0xpolarzero](https://x.com/0xpolarzero)
+* [savvy](https://svvy.sh/) - Contract explorer with in-browser devnet execution
+* [rivet](https://github.com/paradigmxyz/rivet) - Developer Wallet & DevTools for Anvil
+* [ondora.xyz](https://www.ondora.xyz/) - Cross-chain explorer and search engine
+
+### Talks & Presentations
+
+* [The Bytecode with Shafu - WhatsABI](https://www.youtube.com/watch?v=Io8bcYFjoEE) (July 2024)
+* [WhatsABI? - Seminar for Spearbit](https://www.youtube.com/watch?v=sfgassm8SKw) (April 2023)
 
 ## Some Cool People Said...
 
@@ -205,6 +229,7 @@ $ nix develop  # Or use your system's package manager to install node/ts/etc
   having a helpful assembler sub-package was inspiring.
 * [@jacobdehart](https://twitter.com/jacobdehart) for the library name and logo
   that is totally a wasabi and not a green poop!
+* [Etherscan](https://etherscan.io/) for increasing our API limits.
 
 
 ## License
