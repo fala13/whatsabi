@@ -26,5 +26,15 @@ export { proxies };
 import * as providers from "./providers.js";
 export { providers };
 
+import * as abi from "./abi.js";
+export { abi };
+
 import * as errors from "./errors.js";
 export { errors };
+
+import * as interfaces from "./interfaces.js";
+export { interfaces };
+export type {
+    KnownInterfaces,
+    IndexedInterfaces,
+} from "./interfaces.js";

@@ -150,10 +150,11 @@ export class Program {
     notPayable: { [key: number]: number }; // instruction offset -> bytes offset
     fallback?: number; // instruction offset for fallback function
 
-    eventCandidates: Array<string>; // PUSH32 found before a LOG instruction
+    eventCandidates: Set<string>; // PUSH32 found before a LOG instruction
     proxySlots: Array<string>; // PUSH32 found that match known proxy slots
     proxies: Array<ProxyResolver>;
     isFactory: boolean; // CREATE or CREATE2 detected
+    sstoreCount: number; // Number of SSTORE instructions detected, used to determine if this may be a destination contract (vs a proxy)
 
     init?: Program; // Program embedded as init code
 
@@ -161,10 +162,11 @@ export class Program {
         this.dests = {};
         this.selectors = {};
         this.notPayable = {};
-        this.eventCandidates = [];
+        this.eventCandidates = new Set();
         this.proxySlots = [];
         this.proxies = [];
         this.isFactory = false;
+        this.sstoreCount = 0;
         this.init = init;
     }
 }
@@ -259,15 +261,16 @@ export function disasm(bytecode: string, config?: {onlyJumpTable: boolean}): Pro
         if (inst === opcodes.PUSH32) {
             const v = code.value();
             const resolver = slotResolvers[bytesToHex(v)];
-            if (resolver !== undefined) {
-                // While we're looking at PUSH32, let's find proxy slots
+            if (resolver !== undefined && !(p.proxies.length > 0 && p.proxies[0].name === resolver.name)) {
+                // While we're looking at PUSH32, let's find proxy slots, but avoid continuous dupes based off of slots
+                // (Dupes aren't a huge deal, just cleaning up a bit, can be more comprehensive in the future.)
                 p.proxies.push(resolver);
             } else {
                 lastPush32 = v;
             }
             continue
         } else if (isLog(inst) && lastPush32.length > 0) {
-            p.eventCandidates.push(bytesToHex(lastPush32));
+            p.eventCandidates.add(bytesToHex(lastPush32));
             continue
         }
 
@@ -368,6 +371,8 @@ export function disasm(bytecode: string, config?: {onlyJumpTable: boolean}): Pro
                 // CREATE/CREATE2 are part of interestingOpCodes so we can leverage this short circuit
                 if (inst === opcodes.CREATE || inst === opcodes.CREATE2) {
                     p.isFactory = true;
+                } else if (inst === opcodes.SSTORE) {
+                    p.sstoreCount += 1;
                 }
             }
         }
@@ -541,6 +546,14 @@ export function disasm(bytecode: string, config?: {onlyJumpTable: boolean}): Pro
                 p.proxies.push(resolver);
             }
         }
+    }
+
+    if (p.init && p.proxies.length === 0 && p.init.proxies.length > 0) {
+        // If we detected a proxy in init but not in the deploy code, we're going to inherit it for now.
+        // There is a scenario where we have trouble detecting a flattened immutable EIP1967 otherwise.
+        // Hopefully we can improve this later.
+        // See: https://github.com/shazow/whatsabi/issues/171
+        p.proxies = p.init.proxies;
     }
 
     return p;

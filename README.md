@@ -6,12 +6,14 @@ Guess an ABI and detect proxies from an Ethereum bytecode, even if it's unverifi
 
 WhatsABI is perfect for building procedural frontends, embedding in wallets, block explorers, or doing bytecode analysis.
 
+🤝 Used by **Otterscan, Sourcify, Ondora, Rivet,** [and more great projects](#projects-powered-by-whatsabi).
+
 ## Features
 
 **What can WhatsABI do**?
 - Return selectors from bytecode.
 - Look up function signatures from selectors.
-- Helpers for looking up ABI and signatures from public databases (like Sourcify, Etherscan, OpenChain, 4Byte).
+- Helpers for looking up ABI and signatures from public databases (like Sourcify, Etherscan, Blockscout, OpenChain, 4Byte).
 - ✨ Resolve proxy contracts!
 - Small bundle (less than 15 KB) that works with Ethers.js, Viem, and others.
 
@@ -93,6 +95,9 @@ const loader = new whatsabi.loaders.MultiABILoader([
   new whatsabi.loaders.EtherscanABILoader({
     apiKey: "...", // Replace the value with your Etherscan API key
   }),
+  new whatsabi.loaders.BlockscoutABILoader({
+    apiKey: "...", // Replace the value with your Blockscout API key
+  }),
 ]);
 const { abi, name, /* ... other metadata */ } = await loader.getContract(address));
 ```
@@ -168,14 +173,19 @@ console.log("Resolved to:", address);
 
 ### Projects powered by WhatsABI
 
+* ⭐ [otterscan.io](https://otterscan.io/) - Open source block explorer, [contract interactions powered by WhatsABI](https://x.com/otterscan/status/1817261257994756569)
+* ⭐ [sourcify.dev](https://sourcify.dev/) - Verified source code API, proxy resolving powered by WhatsABI
+* ⭐ [rivet](https://github.com/paradigmxyz/rivet) - Developer Wallet & DevTools for Anvil
+* ⭐ [ondora.xyz](https://www.ondora.xyz/) - Cross-chain explorer and search engine
+* ⭐ [thirdweb](https://thirdweb.com/) - Web3 SDK, automatic ABI Resolution powered by WhatsABI
 * [callthis.link](https://callthis.link/) - Transaction builder powered by WhatsABI
-* [otterscan.io](https://otterscan.io/) - Open source block explorer, [contract interactions powered by WhatsABI](https://x.com/otterscan/status/1817261257994756569)
-* [abi.w1nt3r.xyz](https://abi.w1nt3r.xyz/) - A frontend for whatsabi by [@w1nt3r_eth](https://twitter.com/w1nt3r_eth)
-* [ethcmd.com](https://www.ethcmd.com/) - Contract explorer frontend, [uses whatsabi for unverified contracts](https://github.com/verynifty/ethcmd)
-* [monobase.xyz](https://monobase.xyz) - Universal frontend, [uses whatsabi for unverified contracts](https://twitter.com/nazar_ilamanov/status/1659648915195707392)
+* [immortal-whatsabi](https://immortal-whatsabi.on-fleek.app/) - Fetch the JSON ABI of any contract, [github.com/0xcompose/immortal-whatsabi](https://github.com/0xcompose/immortal-whatsabi)
+* [ethcmd.com](https://www.ethcmd.com/) - Contract explorer frontend, [uses WhatsABI for unverified contracts](https://github.com/verynifty/ethcmd)
+* [monobase.xyz](https://monobase.xyz) - Universal frontend, [uses WhatsABI for unverified contracts](https://twitter.com/nazar_ilamanov/status/1659648915195707392)
 * [savvy](https://svvy.sh/) - Contract explorer with in-browser devnet execution
-* [rivet](https://github.com/paradigmxyz/rivet) - Developer Wallet & DevTools for Anvil
-* [ondora.xyz](https://www.ondora.xyz/) - Cross-chain explorer and search engine
+* [blockscout](https://www.blockscout.com/) - Open source block explorer
+* [curvegrid](https://www.curvegrid.com/) - Platform for building EVM applications
+* [tevm](https://tevm.sh/) - EVM toolkit for TypeScript
 
 ### Talks & Presentations
 
@@ -217,6 +227,7 @@ console.log("Resolved to:", address);
 $ cat .env  # Write an .env file with your keys, or `cp .env.example .env`
 export INFURA_API_KEY="..."
 export ETHERSCAN_API_KEY="..."
+export BLOCKSCOUT_API_KEY="..."
 $ nix develop  # Or use your system's package manager to install node/ts/etc
 [dev] $ npm install
 [dev] $ ONLINE=1 make test
@@ -225,6 +236,7 @@ $ nix develop  # Or use your system's package manager to install node/ts/etc
 
 ## Thanks
 
+* ⭐ [Herd Labs](https://www.herd.eco/) for sponsoring WhatsABI.
 * [ethers.js](https://github.com/ethers-io/ethers.js/) for being excellent, and
   having a helpful assembler sub-package was inspiring.
 * [@jacobdehart](https://twitter.com/jacobdehart) for the library name and logo

@@ -1,4 +1,5 @@
-import { Fragment, FunctionFragment } from "ethers";
+import * as AbiFunction from 'ox/AbiFunction';
+import * as AbiEvent from 'ox/AbiEvent';
 
 import type { AnyProvider } from "./providers.js";
 import type { ABI, ABIFunction } from "./abi.js";
@@ -10,6 +11,11 @@ import { CompatibleProvider } from "./providers.js";
 import { defaultABILoader, defaultSignatureLookup } from "./loaders.js";
 import { abiFromBytecode, disasm } from "./disasm.js";
 import { MultiABILoader } from "./loaders.js";
+
+
+/// Magic number we use to determine whether a proxy is reasonably a destination contract or not.
+/// If it has many SSTORE's then it's probably doing something other than proxying.
+const PROXY_SSTORE_COUNT_MAX = 4;
 
 function isAddress(address: string) {
     return address.length === 42 && address.startsWith("0x") && Number(address) >= 0;
@@ -49,6 +55,9 @@ export type AutoloadResult = {
      * @experimental
      */
     isFactory?: boolean;
+
+    /** Set to true if the address has deployed code */
+    hasCode: boolean;
 }
 
 
@@ -87,8 +96,11 @@ export type AutoloadConfig = {
     /** Settings: */
 
     /**
-     * Enable following proxies automagically, if possible. Return the final result.
-     * Note that some proxies are relative to a specific selector (such as DiamondProxies), so they will not be followed
+     * Enable following proxies automagically if *reasonable*. Return the final result.
+     *
+     * Some caveats:
+     * - Proxies that are relative to a specific selector (such as DiamondProxies) will not be followed.
+     * - Contracts that are not primarily proxies will not be followed. Current heuristic is containing at most 5 SSTORE instructions. (See Issue #173)
      *
      * @group Settings
      */
@@ -96,7 +108,7 @@ export type AutoloadConfig = {
 
 
     /**
-     * Load full contract metadata result, include it in {@link AutoloadResult.ContractResult} if successful.
+     * Load full contract metadata result, include it in {@link AutoloadResult.contractResult} if successful.
      *
      * This changes the behaviour of autoload to use {@link ABILoader.getContract} instead of {@link ABILoader.loadABI},
      * which returns a larger superset result including all of the available verified contract metadata.
@@ -156,6 +168,7 @@ export async function autoload(address: string, config: AutoloadConfig): Promise
         address,
         abi: [],
         proxies: [],
+        hasCode: false,
     };
 
     let abiLoader = config.abiLoader;
@@ -190,7 +203,8 @@ export async function autoload(address: string, config: AutoloadConfig): Promise
             },
         );
     }
-    if (!bytecode) return result; // Must be an EOA
+    if (!bytecode || bytecode === "0x") return result; // Must be an EOA
+    result.hasCode = true;
 
     const program = disasm(bytecode);
 
@@ -210,7 +224,7 @@ export async function autoload(address: string, config: AutoloadConfig): Promise
         const f = await diamondProxy.facets(provider, address);
         Object.assign(facets, f);
 
-    } else if (result.proxies.length > 0) {
+    } else if (result.proxies.length > 0 && program.sstoreCount <= PROXY_SSTORE_COUNT_MAX) {
         result.followProxies = async function(selector?: string): Promise<AutoloadResult> {
             // This attempts to follow the first proxy that resolves successfully.
             // FIXME: If there are multiple proxies, should we attempt to merge them somehow?
@@ -315,8 +329,8 @@ export async function autoload(address: string, config: AutoloadConfig): Promise
                 if (r.length >= 1) {
                     a.sig = r[0];
 
-                    // Let ethers.js extract as much metadata as it can from the signature
-                    const extracted = JSON.parse(Fragment.from("function " + a.sig).format("json"));
+                    // Extract as much metadata as it can from the signature
+                    const extracted : any = AbiFunction.from("function " + a.sig, { prepare: false });
                     if (extracted.outputs.length === 0) {
                         // Outputs not included in signature databases -_- (unless something changed)
                         // Let whatsabi keep its best guess, if any.
@@ -332,8 +346,8 @@ export async function autoload(address: string, config: AutoloadConfig): Promise
                 if (r.length >= 1) {
                     a.sig = r[0];
 
-                    // Let ethers.js extract as much metadata as it can from the signature
-                    Object.assign(a, JSON.parse(Fragment.from("event " + a.sig).format("json")))
+                    // Extract as much metadata as it can from the signature
+                    Object.assign(a, AbiEvent.from("function " + a.sig));
                 }
                 if (r.length > 1) a.sigAlts = r.slice(1);
             }));
@@ -392,7 +406,7 @@ function pruneFacets(facets: Record<string, string[]>, abis: Record<string, ABI>
             a = a as ABIFunction;
             let selector = a.selector;
             if (selector === undefined && a.name) {
-                selector = FunctionFragment.getSelector(a.name, a.inputs);
+                selector = AbiFunction.getSelector(a as AbiFunction.AbiFunction);
             }
             if (allowSelectors.has(selector)) {
                 r.push(a);

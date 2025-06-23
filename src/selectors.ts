@@ -1,17 +1,18 @@
-import { FunctionFragment } from "ethers";
+import * as AbiItem from 'ox/AbiItem';
+import * as AbiFunction from 'ox/AbiFunction';
 
-import { keccak256 } from "./utils.js";
 import { disasm } from "./disasm.js";
 
-// Load function selectors mapping from ABI, parsed using ethers.js
+// Load function selectors mapping from ABI, parsed using oxlib
 // Mapping is selector hash to signature
 export function selectorsFromABI(abi: any[]): {[key: string]: string} {
     const r: {[key: string]: string} = {};
 
     for (const el of abi) {
-      if (typeof(el) !== "string" && el.type !== "function") continue;
-      const f = FunctionFragment.from(el).format();
-      r[keccak256(f).substring(0, 10)] = f;
+        if (typeof(el) !== "string" && el.type !== "function") continue;
+        const f = AbiItem.getSignature(el);
+        const selector = AbiFunction.getSelector(el)
+        r[selector] = f;
     }
 
     return r;
