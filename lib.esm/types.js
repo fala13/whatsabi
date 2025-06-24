@@ -7,13 +7,7 @@ export function CompatibleProvider(provider) {
         return new GenericProvider(provider);
     }
     if (typeof provider.resolveName === "function") {
-        // Ethers-like
-        if (typeof provider.send === "function") {
-            return new EthersProvider(provider);
-        }
-        // Probably FallbackProvider or a different custom wrapper?
-        // Need to use higher-level functions.
-        return new GenericProvider(provider);
+        return new EthersProvider(provider);
     }
     if (typeof provider.getEnsAddress === "function") {
         return new ViemProvider(provider);
@@ -57,10 +51,7 @@ class GenericProvider {
         this.provider = provider;
     }
     getStorageAt(address, slot) {
-        if ("getStorageAt" in this.provider) {
-            return this.provider.getStorageAt(address, slot);
-        }
-        return this.provider.getStorage(address, slot);
+        return this.provider.getStorageAt(address, slot);
     }
     call(transaction) {
         return this.provider.call(transaction);
