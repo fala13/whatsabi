@@ -47,6 +47,8 @@ async function main() {
         console.log("No DELEGATECALL detected");
         return;
     }
+    process.exit(0);
+    return;
 }
 main().then().catch(err => {
     console.error("Failed:", err);
