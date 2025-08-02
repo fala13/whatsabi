@@ -10,8 +10,11 @@ import { DiamondProxyResolver } from './proxies.js';
 import { disasm } from './disasm.js';
 //import { withCache } from "../src/internal/filecache.js";
 import { opcodes } from "./opcodes.js";
+//import { CompatibleProvider } from "../src/types.js";
+import { CompatibleProvider } from "./providers.js";
 async function main() {
-    const provider = new ethers.IpcSocketProvider(process.argv[3]);
+    const rawProvider = new ethers.IpcSocketProvider(process.argv[3]);
+    const provider = CompatibleProvider(rawProvider);
     //const provider = new ethers.IpcSocketProvider(process.argv[3]) as unknown as typeof CompatibleProvider;
     const address = process.env["ADDRESS"] || process.argv[2];
     const selector = ""; //process.env["SELECTOR"] || process.argv[3];
