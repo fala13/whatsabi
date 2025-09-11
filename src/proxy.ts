@@ -1,18 +1,9 @@
 #!/usr/bin/env -S tsx
 
 import { ethers } from "ethers";
-
-//import { DiamondProxyResolver } from '../src/proxies.js';
-//import { disasm } from '../src/disasm.js';
-//import { withCache } from "../src/internal/filecache.js";
-//import { opcodes } from "../src/opcodes.js";
-//import { CompatibleProvider } from "../src/types.js";
-//import type { StorageProvider } from "../src/types.js";
 import { DiamondProxyResolver } from './proxies.js';
 import { disasm } from './disasm.js';
-//import { withCache } from "../src/internal/filecache.js";
 import { opcodes } from "./opcodes.js";
-//import { CompatibleProvider } from "../src/types.js";
 import { CompatibleProvider } from "./providers.js";
 
 async function main() {

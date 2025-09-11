@@ -1,0 +1,19 @@
+[package]
+name = "whatsabi-rs"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Rust port of whatsabi proxy/disasm functionality"
+
+[dependencies]
+async-trait = "0.1"
+thiserror = "1.0"
+tiny-keccak = { version = "2.0", features = ["keccak"] }
+hex = "0.4"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = { version = "1.0" }
+
+[features]
+default = []
+
+
