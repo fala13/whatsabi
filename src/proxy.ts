@@ -16,9 +16,11 @@ import { opcodes } from "./opcodes.js";
 import { CompatibleProvider } from "./providers.js";
 
 async function main() {
-    const rawProvider = new ethers.IpcSocketProvider(process.argv[3]);
+    const endpoint = process.argv[3];
+    const rawProvider = endpoint?.startsWith("ws")
+        ? new ethers.WebSocketProvider(endpoint)
+        : new ethers.IpcSocketProvider(endpoint);
     const provider = CompatibleProvider(rawProvider);
-    //const provider = new ethers.IpcSocketProvider(process.argv[3]) as unknown as typeof CompatibleProvider;
     const address = process.env["ADDRESS"] || process.argv[2];
     const selector = "";//process.env["SELECTOR"] || process.argv[3];
     const code = process.argv[4];
