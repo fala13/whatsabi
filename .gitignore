@@ -5,3 +5,4 @@
 /*.tgz
 /docs
 .cache/
+whatsabi-rs/target/

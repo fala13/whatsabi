@@ -8,6 +8,7 @@ const ZERO_ADDR: &str = "0x0000000000000000000000000000000000000000";
 pub trait ProxyResolver: Send + Sync {
     fn name(&self) -> &str;
     async fn resolve(&self, provider: &dyn StorageCallProvider, address: &str, selector: Option<&str>) -> Result<String, ProviderError>;
+    fn as_any(&self) -> &dyn std::any::Any;
 }
 
 pub struct BaseProxyResolver { name: String }
@@ -21,6 +22,7 @@ impl ProxyResolver for GnosisSafeProxyResolver {
         let slot_position = "0x0";
         Ok(address_from_padded(&provider.get_storage_at(address, slot_position).await?))
     }
+    fn as_any(&self) -> &dyn std::any::Any { self }
 }
 
 pub struct LegacyUpgradeableProxyResolver(pub BaseProxyResolver);
@@ -31,6 +33,7 @@ impl ProxyResolver for LegacyUpgradeableProxyResolver {
         let slot_position = "0x1";
         Ok(address_from_padded(&provider.get_storage_at(address, slot_position).await?))
     }
+    fn as_any(&self) -> &dyn std::any::Any { self }
 }
 
 const EIP1967_FALLBACK_SELECTORS: &[&str] = &[
@@ -57,6 +60,7 @@ impl ProxyResolver for EIP1967ProxyResolver {
         }
         Ok(ZERO_ADDR.to_string())
     }
+    fn as_any(&self) -> &dyn std::any::Any { self }
 }
 
 const DIAMOND_SELECTORS: &[&str] = &[
@@ -91,6 +95,7 @@ impl DiamondProxyResolver {
     }
 }
 
+
 struct WrapStorage<'a, P>(&'a P);
 #[async_trait::async_trait]
 impl<'a, P> crate::slots::ReadArrayProvider for WrapStorage<'a, P>
@@ -117,6 +122,7 @@ impl ProxyResolver for DiamondProxyResolver {
         }
         Ok(ZERO_ADDR.to_string())
     }
+    fn as_any(&self) -> &dyn std::any::Any { self }
 }
 
 pub struct ZeppelinOSProxyResolver(pub BaseProxyResolver);
@@ -126,6 +132,7 @@ impl ProxyResolver for ZeppelinOSProxyResolver {
     async fn resolve(&self, provider: &dyn StorageCallProvider, address: &str, _selector: Option<&str>) -> Result<String, ProviderError> {
         Ok(address_from_padded(&provider.get_storage_at(address, SLOTS::ZEPPELINOS_IMPL).await?))
     }
+    fn as_any(&self) -> &dyn std::any::Any { self }
 }
 
 pub struct PROXIABLEProxyResolver(pub BaseProxyResolver);
@@ -135,6 +142,7 @@ impl ProxyResolver for PROXIABLEProxyResolver {
     async fn resolve(&self, provider: &dyn StorageCallProvider, address: &str, _selector: Option<&str>) -> Result<String, ProviderError> {
         Ok(address_from_padded(&provider.get_storage_at(address, SLOTS::PROXIABLE).await?))
     }
+    fn as_any(&self) -> &dyn std::any::Any { self }
 }
 
 pub struct SequenceWalletProxyResolver(pub BaseProxyResolver);
@@ -145,6 +153,7 @@ impl ProxyResolver for SequenceWalletProxyResolver {
         let key = &address.to_lowercase()[2..].to_string();
         Ok(address_from_padded(&provider.get_storage_at(address, key).await?))
     }
+    fn as_any(&self) -> &dyn std::any::Any { self }
 }
 
 pub struct FixedProxyResolver { pub name: String, pub resolved_address: String }
@@ -154,6 +163,7 @@ impl ProxyResolver for FixedProxyResolver {
     async fn resolve(&self, _provider: &dyn StorageCallProvider, _address: &str, _selector: Option<&str>) -> Result<String, ProviderError> {
         Ok(self.resolved_address.clone())
     }
+    fn as_any(&self) -> &dyn std::any::Any { self }
 }
 
 pub struct SLOTS;

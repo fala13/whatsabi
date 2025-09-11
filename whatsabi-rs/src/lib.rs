@@ -4,6 +4,7 @@ pub mod providers;
 pub mod slots;
 pub mod proxies;
 pub mod disasm;
+pub mod fixtures;
 
 pub use disasm::{disasm, Program};
 pub use proxies::{DiamondProxyResolver, ProxyResolver};
@@ -11,7 +12,7 @@ pub use proxies::{DiamondProxyResolver, ProxyResolver};
 // Convenience: resolve targets like src/proxy.ts does
 use providers::{Provider, StorageCallProvider};
 
-pub async fn resolve_proxies_like_cli<P: Provider>(provider: &P, address: &str, bytecode: &str, selector: Option<&str>) -> Result<Vec<String>, String> {
+pub async fn resolve_proxies<P: Provider>(provider: &P, address: &str, bytecode: &str, selector: Option<&str>) -> Result<Vec<String>, String> {
     let program = disasm(bytecode);
     let mut out = Vec::new();
     for resolver in program.proxies.iter() {
