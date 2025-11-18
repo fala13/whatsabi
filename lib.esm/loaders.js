@@ -17,9 +17,9 @@
  * ```ts
  * const loader = new whatsabi.loaders.MultiABILoader([
  *   new whatsabi.loaders.SourcifyABILoader({ chainId: 8453 }),
- *   new whatsabi.loaders.EtherscanABILoader({
- *     baseURL: "https://api.basescan.org/api",
+ *   new whatsabi.loaders.EtherscanV2ABILoader({
  *     apiKey: "...", // Replace the value with your API key
+ *     chainId: 8453,
  *   }),
  * ]);
  * ```
@@ -92,7 +92,10 @@ export class MultiABILoader {
 export class MultiABILoaderError extends errors.LoaderError {
 }
 ;
-/** Etherscan v1 API loader */
+/**
+  * Etherscan v1 API loader
+  * @deprecated v1 API is deprecated, use EtherscanV2ABILoader instead. This class may change to default to v2 in the future.
+  */
 export class EtherscanABILoader {
     name = "EtherscanABILoader";
     apiKey;
@@ -555,7 +558,7 @@ export class OpenChainSignatureLookupError extends errors.LoaderError {
 ;
 export class SamczunSignatureLookup extends OpenChainSignatureLookup {
 }
-export const defaultABILoader = new MultiABILoader([new SourcifyABILoader(), new EtherscanABILoader()]);
+export const defaultABILoader = new MultiABILoader([new SourcifyABILoader(), new EtherscanV2ABILoader({ apiKey: process.env.ETHERSCAN_API_KEY })]);
 export const defaultSignatureLookup = new MultiSignatureLookup([new OpenChainSignatureLookup(), new FourByteSignatureLookup()]);
 /**
  * Return params to use with whatsabi.autoload(...)
@@ -570,8 +573,21 @@ export const defaultSignatureLookup = new MultiSignatureLookup([new OpenChainSig
  * whatsabi.autoload(address, {
  *     provider,
  *     ...whatsabi.loaders.defaultsWithEnv({
+ *         // Use this CHAIN_ID for all loaders that support specifying a chain
+ *         CHAIN_ID: 8453,
+ *         ETHERSCAN_API_KEY: "MYSECRETAPIKEY",
+ *     }),
+ * })
+ * ```
+ *
+ * @example
+ * ```ts
+ * whatsabi.autoload(address, {
+ *     provider,
+ *     ...whatsabi.loaders.defaultsWithEnv({
+ *         // Override specific chain IDs per-loader
  *         SOURCIFY_CHAIN_ID: 42161,
- *         ETHERSCAN_BASE_URL: "https://api.arbiscan.io/api",
+ *         ETHERSCAN_CHAIN_ID: 8453,
  *         ETHERSCAN_API_KEY: "MYSECRETAPIKEY",
  *     }),
  * })
@@ -586,8 +602,13 @@ export const defaultSignatureLookup = new MultiSignatureLookup([new OpenChainSig
 export function defaultsWithEnv(env) {
     return {
         abiLoader: new MultiABILoader([
-            new SourcifyABILoader({ chainId: env.SOURCIFY_CHAIN_ID && Number(env.SOURCIFY_CHAIN_ID) || undefined }),
-            new EtherscanABILoader({ apiKey: env.ETHERSCAN_API_KEY, baseURL: env.ETHERSCAN_BASE_URL }),
+            new SourcifyABILoader({
+                chainId: Number(env.SOURCIFY_CHAIN_ID ?? env.CHAIN_ID) || undefined,
+            }),
+            new EtherscanV2ABILoader({
+                apiKey: env.ETHERSCAN_API_KEY,
+                chainId: Number(env.ETHERSCAN_CHAIN_ID ?? env.CHAIN_ID) || undefined,
+            }),
         ]),
         signatureLookup: new MultiSignatureLookup([
             new OpenChainSignatureLookup(),

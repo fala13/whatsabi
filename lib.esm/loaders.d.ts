@@ -64,7 +64,10 @@ export declare class MultiABILoader implements ABILoader {
 }
 export declare class MultiABILoaderError extends errors.LoaderError {
 }
-/** Etherscan v1 API loader */
+/**
+  * Etherscan v1 API loader
+  * @deprecated v1 API is deprecated, use EtherscanV2ABILoader instead. This class may change to default to v2 in the future.
+  */
 export declare class EtherscanABILoader implements ABILoader {
     #private;
     readonly name: string;
@@ -245,9 +248,10 @@ export declare class SamczunSignatureLookup extends OpenChainSignatureLookup {
 export declare const defaultABILoader: ABILoader;
 export declare const defaultSignatureLookup: SignatureLookup;
 type LoaderEnv = {
-    ETHERSCAN_API_KEY?: string;
-    ETHERSCAN_BASE_URL?: string;
+    CHAIN_ID?: string | number;
     SOURCIFY_CHAIN_ID?: string | number;
+    ETHERSCAN_API_KEY: string;
+    ETHERSCAN_CHAIN_ID?: string | number;
 };
 /**
  * Return params to use with whatsabi.autoload(...)
@@ -262,8 +266,21 @@ type LoaderEnv = {
  * whatsabi.autoload(address, {
  *     provider,
  *     ...whatsabi.loaders.defaultsWithEnv({
+ *         // Use this CHAIN_ID for all loaders that support specifying a chain
+ *         CHAIN_ID: 8453,
+ *         ETHERSCAN_API_KEY: "MYSECRETAPIKEY",
+ *     }),
+ * })
+ * ```
+ *
+ * @example
+ * ```ts
+ * whatsabi.autoload(address, {
+ *     provider,
+ *     ...whatsabi.loaders.defaultsWithEnv({
+ *         // Override specific chain IDs per-loader
  *         SOURCIFY_CHAIN_ID: 42161,
- *         ETHERSCAN_BASE_URL: "https://api.arbiscan.io/api",
+ *         ETHERSCAN_CHAIN_ID: 8453,
  *         ETHERSCAN_API_KEY: "MYSECRETAPIKEY",
  *     }),
  * })
