@@ -10,6 +10,8 @@ async function main() {
     const endpoint = process.argv[3];
     const rawProvider = endpoint?.startsWith("ws")
         ? new ethers.WebSocketProvider(endpoint)
+        : endpoint?.startsWith("http")
+        ? new ethers.JsonRpcProvider(endpoint)
         : new ethers.IpcSocketProvider(endpoint);
     const provider = CompatibleProvider(rawProvider);
     const address = process.env["ADDRESS"] || process.argv[2];
