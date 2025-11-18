@@ -92,7 +92,7 @@ console.log(await signatureLookup.loadEvents("0x721c20121297512b72821b97f5326877
 // Each source will be attempted until a result is found.
 const loader = new whatsabi.loaders.MultiABILoader([
   new whatsabi.loaders.SourcifyABILoader(),
-  new whatsabi.loaders.EtherscanABILoader({
+  new whatsabi.loaders.EtherscanV2ABILoader({
     apiKey: "...", // Replace the value with your Etherscan API key
   }),
   new whatsabi.loaders.BlockscoutABILoader({
@@ -102,7 +102,7 @@ const loader = new whatsabi.loaders.MultiABILoader([
 const { abi, name, /* ... other metadata */ } = await loader.getContract(address));
 ```
 
-See [whatsabi.loaders](https://shazow.github.io/whatsabi/modules/whatsabi.loaders.html) for more examples of what our loaders can do, like loading verified contract source code and compiler settings.
+See [whatsabi.loaders](https://shazow.github.io/whatsabi/modules/loaders.html) for more examples of what our loaders can do, like loading verified contract source code and compiler settings.
 
 All together with our do-all-the-things helper:
 
@@ -118,8 +118,7 @@ let result = await whatsabi.autoload(address, {
 
   // There is a handy helper for adding the default loaders but with your own settings
   ... whatsabi.loaders.defaultsWithEnv({
-    SOURCIFY_CHAIN_ID: 42161,
-    ETHERSCAN_BASE_URL: "https://api.arbiscan.io/api",
+    CHAIN_ID: 42161,
     ETHERSCAN_API_KEY: "MYSECRETAPIKEY",
   }),
 
@@ -179,7 +178,7 @@ console.log("Resolved to:", address);
 * ⭐ [ondora.xyz](https://www.ondora.xyz/) - Cross-chain explorer and search engine
 * ⭐ [thirdweb](https://thirdweb.com/) - Web3 SDK, automatic ABI Resolution powered by WhatsABI
 * [callthis.link](https://callthis.link/) - Transaction builder powered by WhatsABI
-* [immortal-whatsabi](https://immortal-whatsabi.on-fleek.app/) - Fetch the JSON ABI of any contract, [github.com/0xcompose/immortal-whatsabi](https://github.com/0xcompose/immortal-whatsabi)
+* [whatsabi-ui](https://0xcompose.github.io/whatsabi-ui/) - A simple UI for WhatsABI - [github.com/0xcompose/immortal-ui](https://github.com/0xcompose/whatsabi-ui)
 * [ethcmd.com](https://www.ethcmd.com/) - Contract explorer frontend, [uses WhatsABI for unverified contracts](https://github.com/verynifty/ethcmd)
 * [monobase.xyz](https://monobase.xyz) - Universal frontend, [uses WhatsABI for unverified contracts](https://twitter.com/nazar_ilamanov/status/1659648915195707392)
 * [savvy](https://svvy.sh/) - Contract explorer with in-browser devnet execution

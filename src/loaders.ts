@@ -17,9 +17,9 @@
  * ```ts
  * const loader = new whatsabi.loaders.MultiABILoader([
  *   new whatsabi.loaders.SourcifyABILoader({ chainId: 8453 }),
- *   new whatsabi.loaders.EtherscanABILoader({
- *     baseURL: "https://api.basescan.org/api",
+ *   new whatsabi.loaders.EtherscanV2ABILoader({
  *     apiKey: "...", // Replace the value with your API key
+ *     chainId: 8453,
  *   }),
  * ]);
  * ```
@@ -158,7 +158,10 @@ export class MultiABILoader implements ABILoader {
 export class MultiABILoaderError extends errors.LoaderError { };
 
 
-/** Etherscan v1 API loader */
+/**
+  * Etherscan v1 API loader
+  * @deprecated v1 API is deprecated, use EtherscanV2ABILoader instead. This class may change to default to v2 in the future.
+  */
 export class EtherscanABILoader implements ABILoader {
     readonly name: string = "EtherscanABILoader";
 
@@ -198,7 +201,7 @@ export class EtherscanABILoader implements ABILoader {
             action: "getsourcecode",
             address: address,
             ...(this.apiKey && { apikey: this.apiKey }),
-          };
+        };
 
         // Using .set() to overwrite any default values that may be present in baseURL
         Object.entries(params).forEach(([key, value]) => url.searchParams.set(key, value));
@@ -211,7 +214,7 @@ export class EtherscanABILoader implements ABILoader {
             }
 
             // Status 1 means success, but the result could still be empty
-            if (r.result.length > 0 && r.result[0].ABI === "Contract source code not verified")  {
+            if (r.result.length > 0 && r.result[0].ABI === "Contract source code not verified") {
                 return emptyContractResult;
             }
 
@@ -253,7 +256,7 @@ export class EtherscanABILoader implements ABILoader {
             action: "getabi",
             address: address,
             ...(this.apiKey && { apikey: this.apiKey }),
-          };
+        };
 
         // Using .set() to overwrite any default values that may be present in baseURL
         Object.entries(params).forEach(([key, value]) => url.searchParams.set(key, value));
@@ -281,19 +284,19 @@ export class EtherscanABILoaderError extends errors.LoaderError { };
 
 /// Etherscan Contract Source API response
 export type EtherscanContractResult = {
-  SourceCode: string;
-  ABI: string;
-  ContractName: string;
-  CompilerVersion: string;
-  OptimizationUsed: number;
-  Runs: number;
-  ConstructorArguments: string;
-  EVMVersion: string;
-  Library: string;
-  LicenseType: string;
-  Proxy: "1" | "0";
-  Implementation: string;
-  SwarmSource: string;
+    SourceCode: string;
+    ABI: string;
+    ContractName: string;
+    CompilerVersion: string;
+    OptimizationUsed: number;
+    Runs: number;
+    ConstructorArguments: string;
+    EVMVersion: string;
+    Library: string;
+    LicenseType: string;
+    Proxy: "1" | "0";
+    Implementation: string;
+    SwarmSource: string;
 }
 
 
@@ -522,7 +525,7 @@ export class BlockscoutABILoader implements ABILoader {
                     } catch (err: any) {
                         throw new BlockscoutABILoaderError(
                             "BlockscoutABILoader getContract getSources error: " +
-                                err.message,
+                            err.message,
                             {
                                 context: { url, address },
                                 cause: err,
@@ -569,7 +572,7 @@ export class BlockscoutABILoader implements ABILoader {
     }
 }
 
-export class BlockscoutABILoaderError extends errors.LoaderError {}
+export class BlockscoutABILoaderError extends errors.LoaderError { }
 
 /// Blockscout Contract Source API response
 export type BlockscoutContractResult = {
@@ -788,13 +791,14 @@ export class OpenChainSignatureLookupError extends errors.LoaderError { };
 
 export class SamczunSignatureLookup extends OpenChainSignatureLookup { }
 
-export const defaultABILoader: ABILoader = new MultiABILoader([new SourcifyABILoader(), new EtherscanABILoader()]);
+export const defaultABILoader: ABILoader = new MultiABILoader([new SourcifyABILoader(), new EtherscanV2ABILoader({ apiKey: process.env.ETHERSCAN_API_KEY! })]);
 export const defaultSignatureLookup: SignatureLookup = new MultiSignatureLookup([new OpenChainSignatureLookup(), new FourByteSignatureLookup()]);
 
 type LoaderEnv = {
-    ETHERSCAN_API_KEY?: string,
-    ETHERSCAN_BASE_URL?: string,
+    CHAIN_ID?: string | number,
     SOURCIFY_CHAIN_ID?: string | number,
+    ETHERSCAN_API_KEY: string,
+    ETHERSCAN_CHAIN_ID?: string | number,
 }
 
 /**
@@ -810,8 +814,21 @@ type LoaderEnv = {
  * whatsabi.autoload(address, {
  *     provider,
  *     ...whatsabi.loaders.defaultsWithEnv({
+ *         // Use this CHAIN_ID for all loaders that support specifying a chain
+ *         CHAIN_ID: 8453,
+ *         ETHERSCAN_API_KEY: "MYSECRETAPIKEY",
+ *     }),
+ * })
+ * ```
+ *
+ * @example
+ * ```ts
+ * whatsabi.autoload(address, {
+ *     provider,
+ *     ...whatsabi.loaders.defaultsWithEnv({
+ *         // Override specific chain IDs per-loader
  *         SOURCIFY_CHAIN_ID: 42161,
- *         ETHERSCAN_BASE_URL: "https://api.arbiscan.io/api",
+ *         ETHERSCAN_CHAIN_ID: 8453,
  *         ETHERSCAN_API_KEY: "MYSECRETAPIKEY",
  *     }),
  * })
@@ -826,12 +843,17 @@ type LoaderEnv = {
 export function defaultsWithEnv(env: LoaderEnv): Record<string, ABILoader | SignatureLookup> {
     return {
         abiLoader: new MultiABILoader([
-            new SourcifyABILoader({ chainId: env.SOURCIFY_CHAIN_ID && Number(env.SOURCIFY_CHAIN_ID) || undefined }),
-            new EtherscanABILoader({ apiKey: env.ETHERSCAN_API_KEY, baseURL: env.ETHERSCAN_BASE_URL }),
+            new SourcifyABILoader({
+                chainId: Number(env.SOURCIFY_CHAIN_ID ?? env.CHAIN_ID) || undefined,
+            }),
+            new EtherscanV2ABILoader({
+                apiKey: env.ETHERSCAN_API_KEY,
+                chainId: Number(env.ETHERSCAN_CHAIN_ID ?? env.CHAIN_ID) || undefined,
+            }),
         ]),
         signatureLookup: new MultiSignatureLookup([
             new OpenChainSignatureLookup(),
             new FourByteSignatureLookup(),
         ]),
-    }
-}
+    };
+}  
