@@ -73,6 +73,7 @@ export declare class EIP1967ProxyResolver extends BaseProxyResolver implements P
 export declare class DiamondProxyResolver extends BaseProxyResolver implements ProxyResolver {
     name: string;
     readonly storageSlot: string;
+    readArrayLimit: number;
     constructor(name: string, overrideStorageSlot?: string);
     resolve(provider: StorageProvider & CallProvider, address: string, selector: string): Promise<string>;
     facets(provider: StorageProvider, address: string, config?: {

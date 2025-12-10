@@ -64,22 +64,6 @@ export declare class MultiABILoader implements ABILoader {
 }
 export declare class MultiABILoaderError extends errors.LoaderError {
 }
-/**
-  * Etherscan v1 API loader
-  * @deprecated v1 API is deprecated, use EtherscanV2ABILoader instead. This class may change to default to v2 in the future.
-  */
-export declare class EtherscanABILoader implements ABILoader {
-    #private;
-    readonly name: string;
-    apiKey?: string;
-    baseURL: string;
-    constructor(config?: {
-        apiKey?: string;
-        baseURL?: string;
-    });
-    getContract(address: string): Promise<ContractResult>;
-    loadABI(address: string): Promise<any[]>;
-}
 export declare class EtherscanABILoaderError extends errors.LoaderError {
 }
 export type EtherscanContractResult = {
@@ -98,11 +82,32 @@ export type EtherscanContractResult = {
     SwarmSource: string;
 };
 /** Etherscan v2 API loader */
-export declare class EtherscanV2ABILoader extends EtherscanABILoader {
+export declare class EtherscanV2ABILoader implements ABILoader {
+    #private;
     readonly name: string;
+    apiKey?: string;
+    baseURL: string;
     constructor(config: {
         apiKey: string;
         chainId?: number;
+    });
+    getContract(address: string): Promise<ContractResult>;
+    loadABI(address: string): Promise<any[]>;
+}
+/**
+  * Alias to the EtherscanV2ABILoader
+  */
+export declare class EtherscanABILoader extends EtherscanV2ABILoader {
+}
+/**
+  * EtherscanV1ABILoader
+  * @deprecated v1 API is deprecated, use EtherscanV2ABILoader instead. This may be removed in a future release.
+  */
+export declare class EtherscanV1ABILoader extends EtherscanV2ABILoader {
+    readonly name: string;
+    constructor(config?: {
+        apiKey?: string;
+        baseURL?: string;
     });
 }
 export declare class SourcifyABILoader implements ABILoader {

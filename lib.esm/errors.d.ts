@@ -15,3 +15,6 @@ export declare class LoaderError extends WhatsABIError {
 export declare class ProviderError extends WhatsABIError {
     name: string;
 }
+export declare class StorageReadError extends WhatsABIError {
+    name: string;
+}

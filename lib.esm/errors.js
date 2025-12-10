@@ -16,4 +16,7 @@ export class LoaderError extends WhatsABIError {
 export class ProviderError extends WhatsABIError {
     name = 'ProviderError';
 }
+export class StorageReadError extends WhatsABIError {
+    name = 'StorageReadError';
+}
 //# sourceMappingURL=errors.js.map

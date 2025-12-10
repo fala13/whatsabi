@@ -92,19 +92,17 @@ export class MultiABILoader {
 export class MultiABILoaderError extends errors.LoaderError {
 }
 ;
-/**
-  * Etherscan v1 API loader
-  * @deprecated v1 API is deprecated, use EtherscanV2ABILoader instead. This class may change to default to v2 in the future.
-  */
-export class EtherscanABILoader {
-    name = "EtherscanABILoader";
+export class EtherscanABILoaderError extends errors.LoaderError {
+}
+;
+/** Etherscan v2 API loader */
+export class EtherscanV2ABILoader {
+    name = "EtherscanV2ABILoader";
     apiKey;
     baseURL;
     constructor(config) {
-        if (config === undefined)
-            config = {};
         this.apiKey = config.apiKey;
-        this.baseURL = config.baseURL || "https://api.etherscan.io/api";
+        this.baseURL = `https://api.etherscan.io/v2/api?chainid=${config?.chainId ?? 1}`;
     }
     /** Etherscan helper for converting the encoded SourceCode result arg to a decoded ContractSources. */
     #toContractSources(result) {
@@ -198,17 +196,26 @@ export class EtherscanABILoader {
         }
     }
 }
-export class EtherscanABILoaderError extends errors.LoaderError {
+/**
+  * Alias to the EtherscanV2ABILoader
+  */
+export class EtherscanABILoader extends EtherscanV2ABILoader {
 }
 ;
-/** Etherscan v2 API loader */
-export class EtherscanV2ABILoader extends EtherscanABILoader {
-    name = "EtherscanV2ABILoader";
+/**
+  * EtherscanV1ABILoader
+  * @deprecated v1 API is deprecated, use EtherscanV2ABILoader instead. This may be removed in a future release.
+  */
+export class EtherscanV1ABILoader extends EtherscanV2ABILoader {
+    name = "EtherscanV1ABILoader";
     constructor(config) {
-        // chainId is a required parameter in v2, as is an API key
-        super({ apiKey: config.apiKey, baseURL: `https://api.etherscan.io/v2/api?chainid=${config?.chainId ?? 1}` });
+        if (config === undefined)
+            config = {};
+        super({ apiKey: config.apiKey ?? "" });
+        this.baseURL = config.baseURL || "https://api.etherscan.io/api";
     }
 }
+;
 function isSourcifyNotFound(error) {
     return (
     // Sourcify returns strict CORS only if there is no result -_-
@@ -558,7 +565,8 @@ export class OpenChainSignatureLookupError extends errors.LoaderError {
 ;
 export class SamczunSignatureLookup extends OpenChainSignatureLookup {
 }
-export const defaultABILoader = new MultiABILoader([new SourcifyABILoader(), new EtherscanV2ABILoader({ apiKey: process.env.ETHERSCAN_API_KEY })]);
+const defaultEnv = typeof process !== "undefined" ? process.env : {};
+export const defaultABILoader = new MultiABILoader([new SourcifyABILoader(), new EtherscanV2ABILoader({ apiKey: defaultEnv?.ETHERSCAN_API_KEY })]);
 export const defaultSignatureLookup = new MultiSignatureLookup([new OpenChainSignatureLookup(), new FourByteSignatureLookup()]);
 /**
  * Return params to use with whatsabi.autoload(...)

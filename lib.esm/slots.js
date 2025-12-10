@@ -1,4 +1,5 @@
 import { keccak256 } from "./utils.js";
+import { StorageReadError } from "./errors.js";
 export function joinSlot(parts) {
     return keccak256("0x" + parts.map(s => {
         if (s.startsWith("0x")) {
@@ -15,12 +16,16 @@ export function addSlotOffset(slot, offset) {
  * @param {StorageProvider} provider - Implementation of a provider that can call getStorageAt
  * @param {string} address - Address of the contract storage namespace
  * @param {number|string} pos - Slot position of the array
- * @param {number=} width - Array item size, in bytes
+ * @param {number=32} width - Array item size, in bytes
+ * @param {number=0} limit - Array size limit, throw error if exceeded
  * @returns {Promise<string[]>} Values of the array at the given slot
  */
-export async function readArray(provider, address, pos, width = 32) {
+export async function readArray(provider, address, pos, width = 32, limit = 0) {
     // Based on https://gist.github.com/banteg/0cee21909f7c1baedfa6c3d96ffe94f2
     const num = Number(await provider.getStorageAt(address, pos));
+    if (limit !== 0 && num > limit) {
+        throw new StorageReadError(`readArray aborted: Array size ${num} exceeds limit of ${limit}`, { context: { address, pos, width, limit } });
+    }
     const start = keccak256(pos.toString(16)); // toString(16) does the right thing on strings too (no-op) (:
     const itemsPerWord = Math.floor(32 / width);
     const promises = [];
