@@ -1,3 +1,6 @@
+```
+npm run build:esm
+```
 ![WhatsABI](assets/logo.png)
 
 # WhatsABI
