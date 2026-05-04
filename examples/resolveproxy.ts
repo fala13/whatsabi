@@ -8,14 +8,13 @@ import { withCache } from "../src/internal/filecache.js";
 import { opcodes } from "../src/opcodes.js";
 import { CompatibleProvider } from "../src/providers.js";
 
-//const { INFURA_API_KEY } = process.env;
-//const provider = CompatibleProvider(INFURA_API_KEY ? (new ethers.InfuraProvider("homestead", INFURA_API_KEY)) : ethers.getDefaultProvider("homestead"));
+const { INFURA_API_KEY, PROVIDER_RPC_URL } = process.env;
+const provider = CompatibleProvider(INFURA_API_KEY ? (new ethers.InfuraProvider("homestead", INFURA_API_KEY)) : (PROVIDER_RPC_URL ? (new ethers.JsonRpcProvider(PROVIDER_RPC_URL)) : ethers.getDefaultProvider("homestead")));
 
 async function main() {
-    // const provider = new ethers.IpcSocketProvider("/srv/black/reth/reth.ipc");
-    const provider = new ethers.IpcSocketProvider(process.argv[3]);
     const address = process.env["ADDRESS"] || process.argv[2];
-    const selector = "";//process.env["SELECTOR"] || process.argv[3];
+    const selector = process.env["SELECTOR"] || process.argv[3];
+
     console.debug("Loading code for address:", address);
     const code = await withCache(
         `${address}_abi`,
@@ -48,7 +47,6 @@ async function main() {
             console.log("Resolved to address:", addr);
         }
 
-    process.exit(0);
         return;
     }
 
