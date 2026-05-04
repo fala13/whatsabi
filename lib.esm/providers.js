@@ -2,6 +2,12 @@ import { bytesToHex } from "./utils.js";
 import * as errors from "./errors.js";
 ;
 ; // TODO: Can we narrow this more?
+function fromBlockTagOrNumber(block) {
+    if (typeof block === 'number' || typeof block === 'bigint') {
+        return bytesToHex(block);
+    }
+    return block;
+}
 // Abstract away web3 provider inconsistencies
 function isCompatibleProvider(provider) {
     // FIXME: Is there a better way to use the TypeScript type system to do this?
@@ -32,7 +38,7 @@ export function CompatibleProvider(provider) {
         return new ViemProvider(provider);
     }
     if (typeof provider?.eth?.ens?.getAddress === "function") {
-        return new Web3Provider(provider);
+        return new Web3Provider(provider.eth);
     }
     if (typeof provider.request === "function") {
         // Might be a viem transport, or something else
@@ -73,7 +79,40 @@ export function WithCachedCode(provider, codeCache) {
     };
     return p;
 }
-// RPCPRovider thesis is: let's stop trying to adapt to every RPC wrapper library's high-level functions
+/**
+ * Wrap an existing Provider into one that will always use a specified
+ * blockTag for requests.
+ *
+ * This helper is to avoid plumbing the blockTag throughout the whatsabi stack,
+ * and because it's more ergonomic to use the same blockTag consistently across
+ * a given provider.
+ *
+ * @param provider - An existing Provider
+ * @param blockNumber - Block tag or number to use for all requests
+ * @returns {Provider} - Provider that will use the specified blockTag for all requests.
+ * @example
+ * ```ts
+ * import { createPublicClient, http } from 'viem'
+ * import { mainnet } from 'viem/chains'
+ * const client = createPublicClient({ chain: mainnet, transport: http() })
+ * const blockNumber = await client.getBlockNumber() // or "latest", "earliest", etc.
+ * const blockProvider = whatsabi.providers.WithBlockNumber(client, blockNumber);
+ * const r = await whatsabi.autoload(address, { provider: blockProvider });
+ */
+export function WithBlockNumber(provider, blockNumber) {
+    const p = Object.create(provider); // use compatibleProvider as the prototype
+    p.getCode = async function getCode(address) {
+        return await provider.getCode(address, blockNumber);
+    };
+    p.getStorageAt = async function getStorageAt(address, slot) {
+        return await provider.getStorageAt(address, slot, blockNumber);
+    };
+    p.call = async function call(transaction) {
+        return await provider.call(transaction, blockNumber);
+    };
+    return p;
+}
+// RPCProvider thesis is: let's stop trying to adapt to every RPC wrapper library's high-level functions
 // and instead have a discovery for the lowest-level RPC call function that we can use directly.
 // At least whenever possible. Higher-level functionality like getAddress is still tricky.
 class RPCProvider {
@@ -85,24 +124,37 @@ class RPCProvider {
     request(req) {
         return this.provider.request(req);
     }
-    getStorageAt(address, slot) {
-        if (typeof slot === "number") {
-            slot = bytesToHex(slot);
-        }
-        return this.request({ method: "eth_getStorageAt", params: [address, slot, "latest"] });
+    getStorageAt(address, slot, block = "latest") {
+        return this.request({
+            method: "eth_getStorageAt",
+            params: [
+                address,
+                typeof slot === 'number' ? bytesToHex(slot) : slot,
+                fromBlockTagOrNumber(block),
+            ],
+        });
     }
-    call(transaction) {
-        return this.request({ method: "eth_call", params: [
+    call(transaction, block = "latest") {
+        return this.request({
+            method: "eth_call",
+            params: [
                 {
                     from: "0x0000000000000000000000000000000000000001",
                     to: transaction.to,
                     data: transaction.data,
                 },
-                "latest"
-            ] });
+                fromBlockTagOrNumber(block),
+            ],
+        });
     }
-    getCode(address) {
-        return this.request({ method: "eth_getCode", params: [address, "latest"] });
+    getCode(address, block = "latest") {
+        return this.request({
+            method: "eth_getCode",
+            params: [
+                address,
+                fromBlockTagOrNumber(block),
+            ]
+        });
     }
     getAddress(name) {
         throw new MissingENSProviderError("Provider does not implement getAddress, required to resolve ENS", {
@@ -150,7 +202,7 @@ class Web3Provider extends RPCProvider {
         });
     }
     getAddress(name) {
-        return this.provider.eth.ens.getAddress(name);
+        return this.provider.ens.getAddress(name);
     }
 }
 export class Web3ProviderError extends errors.ProviderError {

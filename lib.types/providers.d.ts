@@ -66,3 +66,4 @@ export declare class MissingENSProviderError extends errors.ProviderError {
 }
 export declare class Web3ProviderError extends errors.ProviderError {
 }
+//# sourceMappingURL=providers.d.ts.map

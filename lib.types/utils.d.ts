@@ -7,3 +7,4 @@ export declare class FetchError extends Error {
 }
 export declare function fetchJSON(url: string): Promise<any>;
 export declare function addressWithChecksum(address: string): string;
+//# sourceMappingURL=utils.d.ts.map

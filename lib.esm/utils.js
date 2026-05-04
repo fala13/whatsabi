@@ -19,7 +19,7 @@ export function hexToBytes(hex) {
     return r;
 }
 export function bytesToHex(bytes, padToBytes) {
-    const hex = typeof bytes === 'number' ? bytes.toString(16) : Array.prototype.map.call(bytes, function (n) {
+    const hex = (typeof bytes === 'number' || typeof bytes === 'bigint') ? bytes.toString(16) : Array.prototype.map.call(bytes, function (n) {
         return n.toString(16).padStart(2, "0");
     }).join("");
     if (padToBytes) {
@@ -27,15 +27,15 @@ export function bytesToHex(bytes, padToBytes) {
     }
     return "0x" + hex;
 }
-import { keccak_256 } from '@noble/hashes/sha3';
+import { keccak_256 } from '@noble/hashes/sha3.js';
 export function keccak256(data) {
     if (typeof data !== "string") {
         return bytesToHex(keccak_256(data));
     }
     if (data.startsWith("0x")) {
-        data = hexToBytes(data.slice(2));
+        return bytesToHex(keccak_256(hexToBytes(data.slice(2))));
     }
-    return bytesToHex(keccak_256(data));
+    return bytesToHex(keccak_256(hexToBytes(data)));
 }
 export class FetchError extends Error {
     status;
