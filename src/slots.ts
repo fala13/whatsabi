@@ -22,15 +22,21 @@ export function addSlotOffset(slot: string, offset: number): string {
  * @param {string} address - Address of the contract storage namespace
  * @param {number|string} pos - Slot position of the array
  * @param {number=32} width - Array item size, in bytes
- * @param {number=0} limit - Array size limit, throw error if exceeded
+ * @param {number=0} limit - Array size limit, throw StorageReadError if exceeded
  * @returns {Promise<string[]>} Values of the array at the given slot
  */
 export async function readArray(provider: StorageProvider, address: string, pos: number|string, width: number=32, limit: number=0): Promise<string[]> {
     // Based on https://gist.github.com/banteg/0cee21909f7c1baedfa6c3d96ffe94f2
-    const num = Number(await provider.getStorageAt(address, pos));
-    if (limit !== 0 && num > limit) {
-        throw new StorageReadError(`readArray aborted: Array size ${num} exceeds limit of ${limit}`, { context: { address, pos, width, limit } });
+    // Use BigInt so huge/non-length storage words don't become imprecise floats.
+    const length = BigInt(await provider.getStorageAt(address, pos));
+    if (limit !== 0 && length > BigInt(limit)) {
+        throw new StorageReadError(`readArray aborted: Array size ${length} exceeds limit of ${limit}`, { context: { address, pos, width, limit } });
     }
+    // Refuse to allocate absurd arrays when no explicit limit is set.
+    if (length > BigInt(Number.MAX_SAFE_INTEGER)) {
+        throw new StorageReadError(`readArray aborted: Array size ${length} exceeds safe integer range`, { context: { address, pos, width, limit } });
+    }
+    const num = Number(length);
     const start = keccak256(pos.toString(16)); // toString(16) does the right thing on strings too (no-op) (:
     const itemsPerWord = Math.floor(32 / width);
 

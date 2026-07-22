@@ -6,44 +6,10 @@ export type ContractResult = {
     evmVersion?: string;
     compilerVersion?: string;
     runs?: number;
-    /**
-     * getSources returns the imports -> source code mapping for the contract, if available.
-     *
-     * Caveats:
-     * - Not all loaders support this, so the property could be undefined.
-     * - This call could trigger additional fetch requests, depending on the loader.
-     **/
     getSources?: () => Promise<ContractSources>;
-    /**
-     * Loader that provided the result.
-     * We can make assumptions about the verified status if a verifying loader returned the result.
-     */
     loader?: ABILoader;
-    /**
-     * Contains the full result from the loader provder.
-     * There are no stability guarantees for the data layout of the result, so it's marked as experimental.
-     *
-     * Any useful attributes that can be normalized across loaders should be uplifted into ContractResult.
-     * Please open an issue if you end up relying on rawResponse for properties that should be uplifted.
-     *
-     * @experimental
-     */
     loaderResult?: EtherscanContractResult | SourcifyContractMetadata | SourcifyContractResult | any;
 };
-/**
- * ContractSources is a list of source files.
- * If the source was flattened, it will lack a path attribute.
- *
- * @example
- * ```typescript
- * [{"content": "pragma solidity =0.7.6;\n\nimport ..."}]
- * ```
- *
- * @example
- * ```typescript
- * [{"path": "contracts/Foo.sol", "content:" "pragma solidity =0.7.6;\n\nimport ..."}]
- * ```
- **/
 export type ContractSources = Array<{
     path?: string;
     content: string;
@@ -53,7 +19,6 @@ export interface ABILoader {
     loadABI(address: string): Promise<any[]>;
     getContract(address: string): Promise<ContractResult>;
 }
-/** Load ABIs from multiple providers until a result is found. */
 export declare class MultiABILoader implements ABILoader {
     readonly name: string;
     loaders: ABILoader[];
@@ -81,7 +46,6 @@ export type EtherscanContractResult = {
     Implementation: string;
     SwarmSource: string;
 };
-/** Etherscan v2 API loader */
 export declare class EtherscanV2ABILoader implements ABILoader {
     #private;
     readonly name: string;
@@ -94,15 +58,8 @@ export declare class EtherscanV2ABILoader implements ABILoader {
     getContract(address: string): Promise<ContractResult>;
     loadABI(address: string): Promise<any[]>;
 }
-/**
-  * Alias to the EtherscanV2ABILoader
-  */
 export declare class EtherscanABILoader extends EtherscanV2ABILoader {
 }
-/**
-  * EtherscanV1ABILoader
-  * @deprecated v1 API is deprecated, use EtherscanV2ABILoader instead. This may be removed in a future release.
-  */
 export declare class EtherscanV1ABILoader extends EtherscanV2ABILoader {
     readonly name: string;
     constructor(config?: {
@@ -117,7 +74,6 @@ export declare class SourcifyABILoader implements ABILoader {
     constructor(config?: {
         chainId?: number;
     });
-    /** @deprecated Source paths from the API v2 are no longer prefixed, so stripping is unnecessary for new results. */
     static stripPathPrefix(path: string): string;
     getContract(address: string): Promise<ContractResult>;
     loadABI(address: string): Promise<any[]>;
@@ -164,7 +120,6 @@ export interface SourcifyContractResult {
     }>;
     match?: "match" | "exact_match" | string;
 }
-/** Blockscout API loader: https://docs.blockscout.com/ */
 export declare class BlockscoutABILoader implements ABILoader {
     #private;
     readonly name = "BlockscoutABILoader";
@@ -227,7 +182,6 @@ export type BlockscoutContractResult = {
     has_methods_read_proxy?: boolean;
     has_methods_write_proxy?: boolean;
 };
-/** https://anyabi.xyz/ */
 export declare class AnyABILoader implements ABILoader {
     #private;
     readonly name = "AnyABILoader";
@@ -250,7 +204,6 @@ export declare class MultiSignatureLookup implements SignatureLookup {
     loadFunctions(selector: string): Promise<string[]>;
     loadEvents(hash: string): Promise<string[]>;
 }
-/** https://www.4byte.directory/ */
 export declare class FourByteSignatureLookup implements SignatureLookup {
     load(url: string): Promise<string[]>;
     loadFunctions(selector: string): Promise<string[]>;
@@ -258,10 +211,6 @@ export declare class FourByteSignatureLookup implements SignatureLookup {
 }
 export declare class FourByteSignatureLookupError extends errors.LoaderError {
 }
-/**
- * https://openchain.xyz/
- * Formerly: https://sig.eth.samczsun.com/
- */
 export declare class OpenChainSignatureLookup implements SignatureLookup {
     load(url: string): Promise<any>;
     loadFunctions(selector: string): Promise<string[]>;
@@ -279,45 +228,5 @@ type LoaderEnv = {
     ETHERSCAN_API_KEY: string;
     ETHERSCAN_CHAIN_ID?: string | number;
 };
-/**
- * Return params to use with whatsabi.autoload(...)
- *
- * @example
- * ```ts
- * whatsabi.autoload(address, {provider, ...whatsabi.loaders.defaultsWithEnv(process.env)})
- * ```
- *
- * @example
- * ```ts
- * whatsabi.autoload(address, {
- *     provider,
- *     ...whatsabi.loaders.defaultsWithEnv({
- *         // Use this CHAIN_ID for all loaders that support specifying a chain
- *         CHAIN_ID: 8453,
- *         ETHERSCAN_API_KEY: "MYSECRETAPIKEY",
- *     }),
- * })
- * ```
- *
- * @example
- * ```ts
- * whatsabi.autoload(address, {
- *     provider,
- *     ...whatsabi.loaders.defaultsWithEnv({
- *         // Override specific chain IDs per-loader
- *         SOURCIFY_CHAIN_ID: 42161,
- *         ETHERSCAN_CHAIN_ID: 8453,
- *         ETHERSCAN_API_KEY: "MYSECRETAPIKEY",
- *     }),
- * })
- * ```
- *
- * @example
- * Can be useful for stand-alone usage too!
- * ```ts
- * const { abiLoader, signatureLookup } = whatsabi.loaders.defaultsWithEnv(env);
- * ```
- */
 export declare function defaultsWithEnv(env: LoaderEnv): Record<string, ABILoader | SignatureLookup>;
 export {};
-//# sourceMappingURL=loaders.d.ts.map

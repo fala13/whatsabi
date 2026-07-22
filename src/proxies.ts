@@ -50,6 +50,7 @@
  * ```
  */
 import type { StorageProvider, CallProvider } from "./providers.js";
+import { StorageReadError } from "./errors.js";
 import { addSlotOffset, readArray, joinSlot } from "./slots.js";
 import { addressWithChecksum } from "./utils.js";
 
@@ -152,8 +153,8 @@ export class DiamondProxyResolver extends BaseProxyResolver implements ProxyReso
     override name = "DiamondProxy";
     readonly storageSlot : string;
 
-    // Maximum number of continuous readArray getStorageAt ops to request, otherwise throw StorageReadError.
-    // This is useful to find incorrect slot detection.
+    // Maximum number of continuous readArray getStorageAt ops to request.
+    // Oversized/invalid array lengths (usually wrong storage layout) return empty results from facets().
     readArrayLimit: number = 256;
 
     constructor(name: string, overrideStorageSlot?: string) {
@@ -231,7 +232,14 @@ export class DiamondProxyResolver extends BaseProxyResolver implements ProxyReso
 
         const facetsOffset = addSlotOffset(storageStart, 2); // Facets live in the 3rd slot (0-indexed)
         const addressWidth = 20; // Addresses are 20 bytes
-        const facets = await readArray(provider, address, facetsOffset, addressWidth, this.readArrayLimit);
+        let facets: string[];
+        try {
+            facets = await readArray(provider, address, facetsOffset, addressWidth, this.readArrayLimit);
+        } catch (e) {
+            // Wrong diamond storage layout / not actually a diamond — treat as no facets.
+            if (e instanceof StorageReadError) return {};
+            throw e;
+        }
 
         // 2. Read FacetToSelectors.selectors[] via facetToSelectors[address].selectors[]
         //
@@ -246,8 +254,13 @@ export class DiamondProxyResolver extends BaseProxyResolver implements ProxyReso
         for (const f of facets) {
             const facet = addressFromPadded(f);
             const facetSelectorsSlot = joinSlot([facet, slot]);
-            const selectors = await readArray(provider, address, facetSelectorsSlot, selectorWidth, this.readArrayLimit);
-            facetSelectors[addressWithChecksum(facet)] = selectors.map(s => "0x" + s);
+            try {
+                const selectors = await readArray(provider, address, facetSelectorsSlot, selectorWidth, this.readArrayLimit);
+                facetSelectors[addressWithChecksum(facet)] = selectors.map(s => "0x" + s);
+            } catch (e) {
+                if (e instanceof StorageReadError) continue;
+                throw e;
+            }
 
             if (--limit === 0) break;
         }

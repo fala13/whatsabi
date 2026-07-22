@@ -7,7 +7,7 @@ export declare function addSlotOffset(slot: string, offset: number): string;
  * @param {string} address - Address of the contract storage namespace
  * @param {number|string} pos - Slot position of the array
  * @param {number=32} width - Array item size, in bytes
- * @param {number=0} limit - Array size limit, throw error if exceeded
+ * @param {number=0} limit - Array size limit, throw StorageReadError if exceeded
  * @returns {Promise<string[]>} Values of the array at the given slot
  */
 export declare function readArray(provider: StorageProvider, address: string, pos: number | string, width?: number, limit?: number): Promise<string[]>;

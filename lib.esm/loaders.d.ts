@@ -28,7 +28,7 @@ export type ContractResult = {
      *
      * @experimental
      */
-    loaderResult?: EtherscanContractResult | SourcifyContractMetadata | any;
+    loaderResult?: EtherscanContractResult | SourcifyContractMetadata | SourcifyContractResult | any;
 };
 /**
  * ContractSources is a list of source files.
@@ -117,6 +117,7 @@ export declare class SourcifyABILoader implements ABILoader {
     constructor(config?: {
         chainId?: number;
     });
+    /** @deprecated Source paths from the API v2 are no longer prefixed, so stripping is unnecessary for new results. */
     static stripPathPrefix(path: string): string;
     getContract(address: string): Promise<ContractResult>;
     loadABI(address: string): Promise<any[]>;
@@ -144,6 +145,25 @@ export interface SourcifyContractMetadata {
     sources: Record<string, any>;
     version: number;
 }
+export interface SourcifyContractResult {
+    abi: any[];
+    compilation?: {
+        compilerVersion?: string;
+        compilerSettings?: {
+            evmVersion?: string;
+            optimizer?: {
+                runs?: number;
+            };
+        };
+        name?: string;
+        fullyQualifiedName?: string;
+    };
+    metadata?: SourcifyContractMetadata;
+    sources?: Record<string, {
+        content: string;
+    }>;
+    match?: "match" | "exact_match" | string;
+}
 /** Blockscout API loader: https://docs.blockscout.com/ */
 export declare class BlockscoutABILoader implements ABILoader {
     #private;
@@ -153,6 +173,7 @@ export declare class BlockscoutABILoader implements ABILoader {
     constructor(config?: {
         apiKey?: string;
         baseURL?: string;
+        chainId?: number;
     });
     getContract(address: string): Promise<ContractResult>;
     loadABI(address: string): Promise<any[]>;

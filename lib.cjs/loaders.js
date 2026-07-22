@@ -1,31 +1,42 @@
-/**
- * @module loaders
- * @example
- * Verified contract source code:
- * ```ts
- * const loader = whatsabi.loaders.defaultsWithEnv(env);
- * const result = await loader.getContract(address);
- * const sources = await result.getSources();
- *
- * for (const s of sources) {
- *   console.log(s.path, " -> ", s.content + "...");
- * }
- * ```
- *
- * @example
- * Combine loaders with custom settings behind a single interface, or use {@link defaultsWithEnv} as a shortcut for this.
- * ```ts
- * const loader = new whatsabi.loaders.MultiABILoader([
- *   new whatsabi.loaders.SourcifyABILoader({ chainId: 8453 }),
- *   new whatsabi.loaders.EtherscanV2ABILoader({
- *     apiKey: "...", // Replace the value with your API key
- *     chainId: 8453,
- *   }),
- * ]);
- * ```
- */
-import { fetchJSON } from "./utils.js";
-import * as errors from "./errors.js";
+"use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.defaultSignatureLookup = exports.defaultABILoader = exports.SamczunSignatureLookup = exports.OpenChainSignatureLookupError = exports.OpenChainSignatureLookup = exports.FourByteSignatureLookupError = exports.FourByteSignatureLookup = exports.MultiSignatureLookup = exports.AnyABILoaderError = exports.AnyABILoader = exports.BlockscoutABILoaderError = exports.BlockscoutABILoader = exports.SourcifyABILoaderError = exports.SourcifyABILoader = exports.EtherscanV1ABILoader = exports.EtherscanABILoader = exports.EtherscanV2ABILoader = exports.EtherscanABILoaderError = exports.MultiABILoaderError = exports.MultiABILoader = void 0;
+exports.defaultsWithEnv = defaultsWithEnv;
+const utils_js_1 = require("./utils.js");
+const errors = __importStar(require("./errors.js"));
 const emptyContractResult = {
     ok: false,
     abi: [],
@@ -34,13 +45,9 @@ const emptyContractResult = {
     compilerVersion: "",
     runs: 0,
 };
-/** Load ABIs from multiple providers until a result is found. */
-export class MultiABILoader {
+class MultiABILoader {
     name = "MultiABILoader";
     loaders;
-    /// Note: This callback is used to pull out which loader succeeded without modifying the return API.
-    /// We can remove it once we switch to using getContract for autoload.
-    /// @internal
     onLoad;
     constructor(loaders) {
         this.loaders = loaders;
@@ -57,19 +64,12 @@ export class MultiABILoader {
                 }
             }
             catch (err) {
-                // A 404 is an ordinary miss (contract not indexed by this
-                // loader); anything else is a loader failure. Keep walking the
-                // chain either way, so one degraded loader can't mask a
-                // healthy loader behind it.
                 if (err.cause?.status === 404)
                     continue;
                 failures.push({ loader, error: err });
             }
         }
         if (failures.length > 0) {
-            // No loader produced a result and at least one failed, so we
-            // can't distinguish "unverified" from "unavailable". Surface the
-            // failures rather than returning a false miss.
             throw new MultiABILoaderError("MultiABILoader getContract errors: " + failures.map(f => f.loader.name + ": " + f.error.message).join("; "), {
                 context: { failures, address, loader: failures[0].loader },
                 cause: failures[0].error,
@@ -82,7 +82,6 @@ export class MultiABILoader {
         for (const loader of this.loaders) {
             try {
                 const r = await loader.loadABI(address);
-                // Return the first non-empty result
                 if (r.length > 0) {
                     if (this.onLoad)
                         this.onLoad(loader);
@@ -90,7 +89,6 @@ export class MultiABILoader {
                 }
             }
             catch (err) {
-                // Same walk semantics as getContract above.
                 if (err.cause?.status === 404)
                     continue;
                 failures.push({ loader, error: err });
@@ -105,14 +103,16 @@ export class MultiABILoader {
         return [];
     }
 }
-export class MultiABILoaderError extends errors.LoaderError {
+exports.MultiABILoader = MultiABILoader;
+class MultiABILoaderError extends errors.LoaderError {
 }
+exports.MultiABILoaderError = MultiABILoaderError;
 ;
-export class EtherscanABILoaderError extends errors.LoaderError {
+class EtherscanABILoaderError extends errors.LoaderError {
 }
+exports.EtherscanABILoaderError = EtherscanABILoaderError;
 ;
-/** Etherscan v2 API loader */
-export class EtherscanV2ABILoader {
+class EtherscanV2ABILoader {
     name = "EtherscanV2ABILoader";
     apiKey;
     baseURL;
@@ -120,15 +120,11 @@ export class EtherscanV2ABILoader {
         this.apiKey = config.apiKey;
         this.baseURL = `https://api.etherscan.io/v2/api?chainid=${config?.chainId ?? 1}`;
     }
-    /** Etherscan helper for converting the encoded SourceCode result arg to a decoded ContractSources. */
     #toContractSources(result) {
         if (!result.SourceCode.startsWith("{{")) {
             return [{ content: result.SourceCode }];
         }
-        // Etherscan adds an extra {} to the encoded JSON
         const s = JSON.parse(result.SourceCode.slice(1, result.SourceCode.length - 1));
-        // Flatten sources
-        // { "sources": {"foo.sol": {"content": "..."}}}
         const sources = s.sources;
         return Object.entries(sources).map(([path, source]) => {
             return { path, content: source.content };
@@ -142,16 +138,14 @@ export class EtherscanV2ABILoader {
             address: address,
             ...(this.apiKey && { apikey: this.apiKey }),
         };
-        // Using .set() to overwrite any default values that may be present in baseURL
         Object.entries(params).forEach(([key, value]) => url.searchParams.set(key, value));
         try {
-            const r = await fetchJSON(url.toString());
+            const r = await (0, utils_js_1.fetchJSON)(url.toString());
             if (r.status === "0") {
                 if (r.result === "Contract source code not verified")
                     return emptyContractResult;
-                throw new Error(r.result); // This gets wrapped below
+                throw new Error(r.result);
             }
-            // Status 1 means success, but the result could still be empty
             if (r.result.length > 0 && r.result[0].ABI === "Contract source code not verified") {
                 return emptyContractResult;
             }
@@ -193,14 +187,13 @@ export class EtherscanV2ABILoader {
             address: address,
             ...(this.apiKey && { apikey: this.apiKey }),
         };
-        // Using .set() to overwrite any default values that may be present in baseURL
         Object.entries(params).forEach(([key, value]) => url.searchParams.set(key, value));
         try {
-            const r = await fetchJSON(url.toString());
+            const r = await (0, utils_js_1.fetchJSON)(url.toString());
             if (r.status === "0") {
                 if (r.result === "Contract source code not verified")
                     return [];
-                throw new Error(r.result); // This gets wrapped below
+                throw new Error(r.result);
             }
             return JSON.parse(r.result);
         }
@@ -212,17 +205,12 @@ export class EtherscanV2ABILoader {
         }
     }
 }
-/**
-  * Alias to the EtherscanV2ABILoader
-  */
-export class EtherscanABILoader extends EtherscanV2ABILoader {
+exports.EtherscanV2ABILoader = EtherscanV2ABILoader;
+class EtherscanABILoader extends EtherscanV2ABILoader {
 }
+exports.EtherscanABILoader = EtherscanABILoader;
 ;
-/**
-  * EtherscanV1ABILoader
-  * @deprecated v1 API is deprecated, use EtherscanV2ABILoader instead. This may be removed in a future release.
-  */
-export class EtherscanV1ABILoader extends EtherscanV2ABILoader {
+class EtherscanV1ABILoader extends EtherscanV2ABILoader {
     name = "EtherscanV1ABILoader";
     constructor(config) {
         if (config === undefined)
@@ -231,23 +219,17 @@ export class EtherscanV1ABILoader extends EtherscanV2ABILoader {
         this.baseURL = config.baseURL || "https://api.etherscan.io/api";
     }
 }
+exports.EtherscanV1ABILoader = EtherscanV1ABILoader;
 ;
 function isSourcifyNotFound(error) {
-    // Note: The v1 API returned strict CORS on a miss, so "Failed to fetch"
-    // used to imply not-found. The v2 API serves proper CORS headers and a
-    // real 404, so a network-level failure is a failure again: treating it as
-    // a miss would let MultiABILoader report "unverified" while Sourcify was
-    // merely unreachable.
     return error.status === 404;
 }
-// https://sourcify.dev/
-export class SourcifyABILoader {
+class SourcifyABILoader {
     name = "SourcifyABILoader";
     chainId;
     constructor(config) {
         this.chainId = config?.chainId ?? 1;
     }
-    /** @deprecated Source paths from the API v2 are no longer prefixed, so stripping is unnecessary for new results. */
     static stripPathPrefix(path) {
         return path.replace(/^\/contracts\/(full|partial)_match\/\d*\/\w*\/(sources\/)?/, "");
     }
@@ -259,7 +241,7 @@ export class SourcifyABILoader {
     async #loadSources(address) {
         const url = this.#contractURL(address, "sources");
         try {
-            const result = await fetchJSON(url.toString());
+            const result = await (0, utils_js_1.fetchJSON)(url.toString());
             return Object.entries(result.sources ?? {}).map(([path, source]) => { return { path, content: source.content }; });
         }
         catch (err) {
@@ -272,7 +254,7 @@ export class SourcifyABILoader {
     async #loadContract(address) {
         const url = this.#contractURL(address, "abi,compilation,metadata");
         try {
-            const result = await fetchJSON(url.toString());
+            const result = await (0, utils_js_1.fetchJSON)(url.toString());
             const settings = result.compilation?.compilerSettings;
             return {
                 abi: result.abi ?? [],
@@ -280,7 +262,6 @@ export class SourcifyABILoader {
                 evmVersion: settings?.evmVersion,
                 compilerVersion: result.compilation?.compilerVersion,
                 runs: settings?.optimizer?.runs,
-                // Sources can be large, so they're fetched separately and only on demand
                 getSources: () => this.#loadSources(address),
                 ok: result.match === "match" || result.match === "exact_match",
                 loader: this,
@@ -302,7 +283,7 @@ export class SourcifyABILoader {
     async loadABI(address) {
         const url = this.#contractURL(address, "abi");
         try {
-            const result = await fetchJSON(url.toString());
+            const result = await (0, utils_js_1.fetchJSON)(url.toString());
             return result.abi ?? [];
         }
         catch (err) {
@@ -315,11 +296,12 @@ export class SourcifyABILoader {
         }
     }
 }
-export class SourcifyABILoaderError extends errors.LoaderError {
+exports.SourcifyABILoader = SourcifyABILoader;
+class SourcifyABILoaderError extends errors.LoaderError {
 }
+exports.SourcifyABILoaderError = SourcifyABILoaderError;
 ;
-/** Blockscout API loader: https://docs.blockscout.com/ */
-export class BlockscoutABILoader {
+class BlockscoutABILoader {
     name = "BlockscoutABILoader";
     apiKey;
     baseURL;
@@ -327,15 +309,11 @@ export class BlockscoutABILoader {
         if (config === undefined)
             config = {};
         this.apiKey = config.apiKey;
-        // A chainId routes through the multichain gateway, which requires an
-        // apiKey (or an x402 payment); the server enforces this. An explicit
-        // baseURL wins over chainId.
         this.baseURL = config.baseURL ||
             (config.chainId !== undefined
                 ? `https://api.blockscout.com/${config.chainId}/api`
                 : "https://eth.blockscout.com/api");
     }
-    /** Blockscout helper for converting the result arg to a decoded ContractSources. */
     #toContractSources(result) {
         const sources = [];
         if (result.source_code) {
@@ -409,9 +387,6 @@ export class BlockscoutABILoader {
             const result = responseBody;
             if (!result.abi)
                 return emptyContractResult;
-            // Blockscout can return an ABI without optional source or compiler
-            // metadata; ContractResult models those fields as optional, so a
-            // usable ABI is enough to consider the contract found.
             return {
                 abi: result.abi,
                 name: result.name ?? null,
@@ -451,15 +426,15 @@ export class BlockscoutABILoader {
         return (await this.#loadContract(address)).abi;
     }
 }
-export class BlockscoutABILoaderError extends errors.LoaderError {
+exports.BlockscoutABILoader = BlockscoutABILoader;
+class BlockscoutABILoaderError extends errors.LoaderError {
 }
+exports.BlockscoutABILoaderError = BlockscoutABILoaderError;
 function isAnyABINotFound(error) {
     return (error.status === 404 ||
-        // "ABI not found" or "Not found"
         /not found/i.test(error.message));
 }
-/** https://anyabi.xyz/ */
-export class AnyABILoader {
+class AnyABILoader {
     name = "AnyABILoader";
     chainId;
     constructor(config) {
@@ -468,7 +443,7 @@ export class AnyABILoader {
     async #fetchAnyABI(address) {
         const url = "https://anyabi.xyz/api/get-abi/" + this.chainId + "/" + address;
         try {
-            const r = await fetchJSON(url);
+            const r = await (0, utils_js_1.fetchJSON)(url);
             const { abi, name } = r;
             return {
                 abi: abi,
@@ -504,11 +479,12 @@ export class AnyABILoader {
         return [];
     }
 }
-export class AnyABILoaderError extends errors.LoaderError {
+exports.AnyABILoader = AnyABILoader;
+class AnyABILoaderError extends errors.LoaderError {
 }
+exports.AnyABILoaderError = AnyABILoaderError;
 ;
-// Load signatures from multiple providers until a result is found.
-export class MultiSignatureLookup {
+class MultiSignatureLookup {
     lookups;
     constructor(lookups) {
         this.lookups = lookups;
@@ -516,7 +492,6 @@ export class MultiSignatureLookup {
     async loadFunctions(selector) {
         for (const lookup of this.lookups) {
             const r = await lookup.loadFunctions(selector);
-            // Return the first non-empty result
             if (r.length > 0)
                 return r;
         }
@@ -525,18 +500,17 @@ export class MultiSignatureLookup {
     async loadEvents(hash) {
         for (const lookup of this.lookups) {
             const r = await lookup.loadEvents(hash);
-            // Return the first non-empty result
             if (r.length > 0)
                 return r;
         }
         return [];
     }
 }
-/** https://www.4byte.directory/ */
-export class FourByteSignatureLookup {
+exports.MultiSignatureLookup = MultiSignatureLookup;
+class FourByteSignatureLookup {
     async load(url) {
         try {
-            const r = await fetchJSON(url);
+            const r = await (0, utils_js_1.fetchJSON)(url);
             if (r.results === undefined)
                 return [];
             return r.results.map((r) => { return r.text_signature; });
@@ -551,24 +525,21 @@ export class FourByteSignatureLookup {
         }
     }
     async loadFunctions(selector) {
-        // Note: Could also lookup directly on Github, but not sure that's a good idea
         return this.load("https://www.4byte.directory/api/v1/signatures/?hex_signature=" + selector);
     }
     async loadEvents(hash) {
         return this.load("https://www.4byte.directory/api/v1/event-signatures/?hex_signature=" + hash);
     }
 }
-export class FourByteSignatureLookupError extends errors.LoaderError {
+exports.FourByteSignatureLookup = FourByteSignatureLookup;
+class FourByteSignatureLookupError extends errors.LoaderError {
 }
+exports.FourByteSignatureLookupError = FourByteSignatureLookupError;
 ;
-/**
- * https://openchain.xyz/
- * Formerly: https://sig.eth.samczsun.com/
- */
-export class OpenChainSignatureLookup {
+class OpenChainSignatureLookup {
     async load(url) {
         try {
-            const r = await fetchJSON(url);
+            const r = await (0, utils_js_1.fetchJSON)(url);
             if (!r.ok)
                 throw new Error("OpenChain API bad response: " + JSON.stringify(r));
             return r;
@@ -591,54 +562,18 @@ export class OpenChainSignatureLookup {
         return (r.result.event[hash] || []).map((item) => item.name);
     }
 }
-export class OpenChainSignatureLookupError extends errors.LoaderError {
+exports.OpenChainSignatureLookup = OpenChainSignatureLookup;
+class OpenChainSignatureLookupError extends errors.LoaderError {
 }
+exports.OpenChainSignatureLookupError = OpenChainSignatureLookupError;
 ;
-export class SamczunSignatureLookup extends OpenChainSignatureLookup {
+class SamczunSignatureLookup extends OpenChainSignatureLookup {
 }
+exports.SamczunSignatureLookup = SamczunSignatureLookup;
 const defaultEnv = globalThis.process?.env ?? {};
-export const defaultABILoader = new MultiABILoader([new SourcifyABILoader(), new EtherscanV2ABILoader({ apiKey: defaultEnv?.ETHERSCAN_API_KEY })]);
-export const defaultSignatureLookup = new MultiSignatureLookup([new OpenChainSignatureLookup(), new FourByteSignatureLookup()]);
-/**
- * Return params to use with whatsabi.autoload(...)
- *
- * @example
- * ```ts
- * whatsabi.autoload(address, {provider, ...whatsabi.loaders.defaultsWithEnv(process.env)})
- * ```
- *
- * @example
- * ```ts
- * whatsabi.autoload(address, {
- *     provider,
- *     ...whatsabi.loaders.defaultsWithEnv({
- *         // Use this CHAIN_ID for all loaders that support specifying a chain
- *         CHAIN_ID: 8453,
- *         ETHERSCAN_API_KEY: "MYSECRETAPIKEY",
- *     }),
- * })
- * ```
- *
- * @example
- * ```ts
- * whatsabi.autoload(address, {
- *     provider,
- *     ...whatsabi.loaders.defaultsWithEnv({
- *         // Override specific chain IDs per-loader
- *         SOURCIFY_CHAIN_ID: 42161,
- *         ETHERSCAN_CHAIN_ID: 8453,
- *         ETHERSCAN_API_KEY: "MYSECRETAPIKEY",
- *     }),
- * })
- * ```
- *
- * @example
- * Can be useful for stand-alone usage too!
- * ```ts
- * const { abiLoader, signatureLookup } = whatsabi.loaders.defaultsWithEnv(env);
- * ```
- */
-export function defaultsWithEnv(env) {
+exports.defaultABILoader = new MultiABILoader([new SourcifyABILoader(), new EtherscanV2ABILoader({ apiKey: defaultEnv?.ETHERSCAN_API_KEY })]);
+exports.defaultSignatureLookup = new MultiSignatureLookup([new OpenChainSignatureLookup(), new FourByteSignatureLookup()]);
+function defaultsWithEnv(env) {
     return {
         abiLoader: new MultiABILoader([
             new SourcifyABILoader({
