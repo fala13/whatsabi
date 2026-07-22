@@ -60,7 +60,7 @@ export type ContractResult = {
      *
      * @experimental
      */
-    loaderResult?: EtherscanContractResult | SourcifyContractMetadata | any;
+    loaderResult?: EtherscanContractResult | SourcifyContractMetadata | SourcifyContractResult | any;
 }
 
 /**
@@ -113,6 +113,7 @@ export class MultiABILoader implements ABILoader {
     }
 
     async getContract(address: string): Promise<ContractResult> {
+        const failures: { loader: ABILoader, error: any }[] = [];
         for (const loader of this.loaders) {
             try {
                 const r = await loader.getContract(address);
@@ -121,18 +122,28 @@ export class MultiABILoader implements ABILoader {
                     return r;
                 }
             } catch (err: any) {
+                // A 404 is an ordinary miss (contract not indexed by this
+                // loader); anything else is a loader failure. Keep walking the
+                // chain either way, so one degraded loader can't mask a
+                // healthy loader behind it.
                 if (err.cause?.status === 404) continue;
-
-                throw new MultiABILoaderError("MultiABILoader getContract error: " + err.message, {
-                    context: { loader, address },
-                    cause: err,
-                });
+                failures.push({ loader, error: err });
             }
+        }
+        if (failures.length > 0) {
+            // No loader produced a result and at least one failed, so we
+            // can't distinguish "unverified" from "unavailable". Surface the
+            // failures rather than returning a false miss.
+            throw new MultiABILoaderError("MultiABILoader getContract errors: " + failures.map(f => f.loader.name + ": " + f.error.message).join("; "), {
+                context: { failures, address, loader: failures[0].loader },
+                cause: failures[0].error,
+            });
         }
         return emptyContractResult;
     }
 
     async loadABI(address: string): Promise<any[]> {
+        const failures: { loader: ABILoader, error: any }[] = [];
         for (const loader of this.loaders) {
             try {
                 const r = await loader.loadABI(address);
@@ -143,13 +154,16 @@ export class MultiABILoader implements ABILoader {
                     return r;
                 }
             } catch (err: any) {
+                // Same walk semantics as getContract above.
                 if (err.cause?.status === 404) continue;
-
-                throw new MultiABILoaderError("MultiABILoader loadABI error: " + err.message, {
-                    context: { loader, address },
-                    cause: err,
-                });
+                failures.push({ loader, error: err });
             }
+        }
+        if (failures.length > 0) {
+            throw new MultiABILoaderError("MultiABILoader loadABI errors: " + failures.map(f => f.loader.name + ": " + f.error.message).join("; "), {
+                context: { failures, address, loader: failures[0].loader },
+                cause: failures[0].error,
+            });
         }
         return [];
     }
@@ -296,7 +310,7 @@ export class EtherscanV2ABILoader implements ABILoader {
 /**
   * Alias to the EtherscanV2ABILoader
   */
-export class EtherscanABILoader extends EtherscanV2ABILoader {};
+export class EtherscanABILoader extends EtherscanV2ABILoader { };
 
 /**
   * EtherscanV1ABILoader
@@ -313,11 +327,12 @@ export class EtherscanV1ABILoader extends EtherscanV2ABILoader {
 };
 
 function isSourcifyNotFound(error: any): boolean {
-    return (
-        // Sourcify returns strict CORS only if there is no result -_-
-        error.message === "Failed to fetch" ||
-        error.status === 404
-    );
+    // Note: The v1 API returned strict CORS on a miss, so "Failed to fetch"
+    // used to imply not-found. The v2 API serves proper CORS headers and a
+    // real 404, so a network-level failure is a failure again: treating it as
+    // a miss would let MultiABILoader report "unverified" while Sourcify was
+    // merely unreachable.
+    return error.status === 404;
 }
 
 // https://sourcify.dev/
@@ -330,107 +345,76 @@ export class SourcifyABILoader implements ABILoader {
         this.chainId = config?.chainId ?? 1;
     }
 
+    /** @deprecated Source paths from the API v2 are no longer prefixed, so stripping is unnecessary for new results. */
     static stripPathPrefix(path: string): string {
         return path.replace(/^\/contracts\/(full|partial)_match\/\d*\/\w*\/(sources\/)?/, "");
     }
 
-    async #loadContract(url: string): Promise<ContractResult> {
+    #contractURL(address: string, fields: string): URL {
+        const url = new URL(`https://sourcify.dev/server/v2/contract/${this.chainId}/${address}`);
+        url.searchParams.set("fields", fields);
+        return url;
+    }
+
+    async #loadSources(address: string): Promise<ContractSources> {
+        const url = this.#contractURL(address, "sources");
+
         try {
-            const r = await fetchJSON(url);
-            const files: Array<{ name: string, path: string, content: string }> = r.files ?? r;
+            const result = await fetchJSON(url.toString()) as SourcifyContractResult;
+            return Object.entries(result.sources ?? {}).map(([path, source]) => { return { path, content: source.content } });
+        } catch (err: any) {
+            throw new SourcifyABILoaderError("SourcifyABILoader getSources error: " + err.message, {
+                context: { address, url: url.toString() },
+                cause: err,
+            });
+        }
+    }
 
-            // Metadata is usually the first one
-            const metadata = files.find((f) => f.name === "metadata.json")
-            if (metadata === undefined) throw new SourcifyABILoaderError("metadata.json not found");
+    async #loadContract(address: string): Promise<ContractResult> {
+        const url = this.#contractURL(address, "abi,compilation,metadata");
 
-            // Note: Sometimes metadata.json contains sources, but not always. So we can't rely on just the metadata.json
-            const m = JSON.parse(metadata.content) as SourcifyContractMetadata;
-
-            // Sourcify includes a title from the Natspec comments
-            let name = m.output.devdoc?.title;
-            if (!name && m.settings.compilationTarget) {
-                // Try to use the compilation target name as a fallback
-                const targetNames = Object.values(m.settings.compilationTarget);
-                if (targetNames.length > 0) {
-                    name = targetNames[0];
-                }
-            }
+        try {
+            const result = await fetchJSON(url.toString()) as SourcifyContractResult;
+            const settings = result.compilation?.compilerSettings;
 
             return {
-                abi: m.output.abi,
-                name: name ?? null,
-                evmVersion: m.settings.evmVersion,
-                compilerVersion: m.compiler.version,
-                runs: m.settings.optimizer.runs,
-
-                // TODO: Paths will have a sourcify prefix, do we want to strip it to help normalize? It doesn't break anything keeping the prefix, so not sure.
-                // E.g. /contracts/full_match/1/0x1F98431c8aD98523631AE4a59f267346ea31F984/sources/contracts/interfaces/IERC20Minimal.sol
-                // Can use stripPathPrefix helper to do this, but maybe we want something like getSources({ normalize: true })?
-                getSources: async () => files.map(({ path, content }) => { return { path, content } }),
-
-                ok: true,
+                abi: result.abi ?? [],
+                name: result.compilation?.name ?? null,
+                evmVersion: settings?.evmVersion,
+                compilerVersion: result.compilation?.compilerVersion,
+                runs: settings?.optimizer?.runs,
+                // Sources can be large, so they're fetched separately and only on demand
+                getSources: () => this.#loadSources(address),
+                ok: result.match === "match" || result.match === "exact_match",
                 loader: this,
-                loaderResult: m,
+                loaderResult: result,
             };
         } catch (err: any) {
             if (isSourcifyNotFound(err)) return emptyContractResult;
             throw new SourcifyABILoaderError("SourcifyABILoader load contract error: " + err.message, {
-                context: { url },
+                context: { address, url: url.toString() },
                 cause: err,
             });
         }
     }
 
     async getContract(address: string): Promise<ContractResult> {
-        {
-            // Full match index includes verification settings that matches exactly
-            const url = "https://sourcify.dev/server/files/" + this.chainId + "/" + address;
-            const r = await this.#loadContract(url);
-            if (r.ok) return r;
-        }
-
-        {
-            // Partial match index is for verified contracts whose settings didn't match exactly
-            const url = "https://sourcify.dev/server/files/any/" + this.chainId + "/" + address;
-            const r = await this.#loadContract(url);
-            if (r.ok) return r;
-        }
-
-        return emptyContractResult;
+        return this.#loadContract(address);
     }
 
     async loadABI(address: string): Promise<any[]> {
-        {
-            // Full match index includes verification settings that matches exactly
-            const url = "https://sourcify.dev/server/repository/contracts/full_match/" + this.chainId + "/" + address + "/metadata.json";
-            try {
-                return (await fetchJSON(url)).output.abi;
-            } catch (err: any) {
-                if (!isSourcifyNotFound(err)) {
-                    throw new SourcifyABILoaderError("SourcifyABILoader loadABI error: " + err.message, {
-                        context: { address, url },
-                        cause: err,
-                    });
-                }
-            }
-        }
+        const url = this.#contractURL(address, "abi");
 
-        {
-            // Partial match index is for verified contracts whose settings didn't match exactly
-            const url = "https://sourcify.dev/server/repository/contracts/partial_match/" + this.chainId + "/" + address + "/metadata.json";
-            try {
-                return (await fetchJSON(url)).output.abi;
-            } catch (err: any) {
-                if (!isSourcifyNotFound(err)) {
-                    throw new SourcifyABILoaderError("SourcifyABILoader loadABI error: " + err.message, {
-                        context: { address, url },
-                        cause: err,
-                    });
-                }
-            }
+        try {
+            const result = await fetchJSON(url.toString()) as SourcifyContractResult;
+            return result.abi ?? [];
+        } catch (err: any) {
+            if (isSourcifyNotFound(err)) return [];
+            throw new SourcifyABILoaderError("SourcifyABILoader loadABI error: " + err.message, {
+                context: { address, url: url.toString() },
+                cause: err,
+            });
         }
-
-        return [];
     }
 }
 
@@ -459,6 +443,24 @@ export interface SourcifyContractMetadata {
     version: number;
 }
 
+/// Sourcify Contract result from API v2 response
+export interface SourcifyContractResult {
+    abi: any[];
+    compilation?: {
+        compilerVersion?: string;
+        compilerSettings?: {
+            evmVersion?: string;
+            optimizer?: { runs?: number };
+        };
+        name?: string;
+        fullyQualifiedName?: string;
+    };
+    /// Solc/Vyper standard metadata, carrying the Natspec devdoc/userdoc
+    metadata?: SourcifyContractMetadata;
+    sources?: Record<string, { content: string }>;
+    match?: "match" | "exact_match" | string;
+}
+
 /** Blockscout API loader: https://docs.blockscout.com/ */
 export class BlockscoutABILoader implements ABILoader {
     readonly name = "BlockscoutABILoader";
@@ -466,10 +468,16 @@ export class BlockscoutABILoader implements ABILoader {
     apiKey?: string;
     baseURL: string;
 
-    constructor(config?: { apiKey?: string; baseURL?: string }) {
+    constructor(config?: { apiKey?: string; baseURL?: string; chainId?: number }) {
         if (config === undefined) config = {};
         this.apiKey = config.apiKey;
-        this.baseURL = config.baseURL || "https://eth.blockscout.com/api";
+        // A chainId routes through the multichain gateway, which requires an
+        // apiKey (or an x402 payment); the server enforces this. An explicit
+        // baseURL wins over chainId.
+        this.baseURL = config.baseURL ||
+            (config.chainId !== undefined
+                ? `https://api.blockscout.com/${config.chainId}/api`
+                : "https://eth.blockscout.com/api");
     }
 
     /** Blockscout helper for converting the result arg to a decoded ContractSources. */
@@ -497,36 +505,92 @@ export class BlockscoutABILoader implements ABILoader {
         return sources;
     }
 
-    async getContract(address: string): Promise<ContractResult> {
+    async #loadContract(address: string): Promise<ContractResult> {
         let url = this.baseURL + `/v2/smart-contracts/${address}`;
         if (this.apiKey) url += "?apikey=" + this.apiKey;
 
         try {
-            const r = await fetch(url);
-            const result = (await r.json()) as BlockscoutContractResult;
+            const response = await fetch(url);
+            if (response.status === 404) return emptyContractResult;
 
-            if (
-                !result.abi ||
-                !result.name ||
-                !result.compiler_version ||
-                !result.source_code
-            ) {
-                return emptyContractResult;
+            const responseText = await response.text();
+            let responseBody: unknown = responseText;
+            try {
+                responseBody = JSON.parse(responseText);
+            } catch (err: any) {
+                if (response.ok) {
+                    throw new BlockscoutABILoaderError(
+                        "BlockscoutABILoader load contract returned invalid JSON",
+                        {
+                            context: {
+                                url,
+                                address,
+                                status: response.status,
+                                response: responseText,
+                            },
+                            cause: err,
+                        }
+                    );
+                }
             }
 
+            const status = [response.status, response.statusText]
+                .filter(Boolean)
+                .join(" ");
+            if (!response.ok) {
+                const responseDescription = typeof responseBody === "string"
+                    ? responseBody
+                    : JSON.stringify(responseBody);
+                throw new BlockscoutABILoaderError(
+                    `BlockscoutABILoader load contract response error: ${status}: ${responseDescription}`,
+                    {
+                        context: {
+                            url,
+                            address,
+                            status: response.status,
+                            response: responseBody,
+                        },
+                    }
+                );
+            }
+
+            if (
+                !responseBody ||
+                typeof responseBody !== "object" ||
+                Array.isArray(responseBody)
+            ) {
+                throw new BlockscoutABILoaderError(
+                    "BlockscoutABILoader load contract returned invalid JSON",
+                    {
+                        context: {
+                            url,
+                            address,
+                            status: response.status,
+                            response: responseBody,
+                        },
+                    }
+                );
+            }
+
+            const result = responseBody as BlockscoutContractResult;
+            if (!result.abi) return emptyContractResult;
+
+            // Blockscout can return an ABI without optional source or compiler
+            // metadata; ContractResult models those fields as optional, so a
+            // usable ABI is enough to consider the contract found.
             return {
                 abi: result.abi,
-                name: result.name,
-                evmVersion: result.evm_version || "",
+                name: result.name ?? null,
+                evmVersion: result.evm_version,
                 compilerVersion: result.compiler_version,
-                runs: result.optimization_runs || 200,
+                runs: result.optimization_runs ?? undefined,
 
                 getSources: async () => {
                     try {
                         return this.#toContractSources(result);
                     } catch (err: any) {
                         throw new BlockscoutABILoaderError(
-                            "BlockscoutABILoader getContract getSources error: " +
+                            "BlockscoutABILoader load contract getSources error: " +
                             err.message,
                             {
                                 context: { url, address },
@@ -541,8 +605,9 @@ export class BlockscoutABILoader implements ABILoader {
                 loaderResult: result,
             };
         } catch (err: any) {
+            if (err instanceof BlockscoutABILoaderError) throw err;
             throw new BlockscoutABILoaderError(
-                "BlockscoutABILoader getContract error: " + err.message,
+                "BlockscoutABILoader load contract error: " + err.message,
                 {
                     context: { url, address },
                     cause: err,
@@ -551,26 +616,12 @@ export class BlockscoutABILoader implements ABILoader {
         }
     }
 
-    async loadABI(address: string): Promise<any[]> {
-        let url = this.baseURL + `/v2/smart-contracts/${address}`;
-        if (this.apiKey) url += "?apikey=" + this.apiKey;
+    async getContract(address: string): Promise<ContractResult> {
+        return this.#loadContract(address);
+    }
 
-        try {
-            const r = await fetch(url);
-            const result = (await r.json()) as BlockscoutContractResult;
-            if (!result.abi) {
-                return [];
-            }
-            return result.abi;
-        } catch (err: any) {
-            throw new BlockscoutABILoaderError(
-                "BlockscoutABILoader loadABI error: " + err.message,
-                {
-                    context: { url, address },
-                    cause: err,
-                }
-            );
-        }
+    async loadABI(address: string): Promise<any[]> {
+        return (await this.#loadContract(address)).abi;
     }
 }
 
@@ -793,7 +844,13 @@ export class OpenChainSignatureLookupError extends errors.LoaderError { };
 
 export class SamczunSignatureLookup extends OpenChainSignatureLookup { }
 
-const defaultEnv = typeof process !== "undefined" ? process.env : {};
+const defaultEnv = (
+    globalThis as {
+        process?: {
+            env?: Record<string, string | undefined>;
+        };
+    }
+).process?.env ?? {};
 
 export const defaultABILoader: ABILoader = new MultiABILoader([new SourcifyABILoader(), new EtherscanV2ABILoader({ apiKey: defaultEnv?.ETHERSCAN_API_KEY! })]);
 export const defaultSignatureLookup: SignatureLookup = new MultiSignatureLookup([new OpenChainSignatureLookup(), new FourByteSignatureLookup()]);
