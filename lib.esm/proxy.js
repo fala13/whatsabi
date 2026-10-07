@@ -4,17 +4,21 @@ import { DiamondProxyResolver } from './proxies.js';
 import { disasm } from './disasm.js';
 import { opcodes } from "./opcodes.js";
 import { CompatibleProvider } from "./providers.js";
+import { readFileSync } from "fs";
 async function main() {
     const endpoint = process.argv[3];
+    const address = process.env["ADDRESS"] || process.argv[2];
+    const selector = ""; //process.env["SELECTOR"] || process.argv[3];
+    // argv is capped at MAX_ARG_STRLEN (128KiB). Callers that would exceed it
+    // omit argv[4] and write the hex bytecode on stdin. Read that before
+    // opening the provider so a full pipe cannot stall startup.
+    const code = (process.argv[4] ?? readFileSync(0, "utf8")).trim();
     const rawProvider = endpoint?.startsWith("ws")
         ? new ethers.WebSocketProvider(endpoint)
         : endpoint?.startsWith("http")
             ? new ethers.JsonRpcProvider(endpoint)
             : new ethers.IpcSocketProvider(endpoint);
     const provider = CompatibleProvider(rawProvider);
-    const address = process.env["ADDRESS"] || process.argv[2];
-    const selector = ""; //process.env["SELECTOR"] || process.argv[3];
-    const code = process.argv[4];
     const program = disasm(code);
     let hasDelegateCall = false;
     for (const fn of Object.values(program.dests)) {
