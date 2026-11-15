@@ -34,6 +34,14 @@ function fromBlockTagOrNumber(block: BlockTagOrNumber): string {
     return block;
 }
 
+// eth_getStorageAt position is a QUANTITY. Bare hex is rejected with -32602.
+// Already-prefixed slots are left unchanged.
+function storageSlotParam(slot: number | string): string {
+    if (typeof slot === "number") return bytesToHex(slot);
+    if (slot.startsWith("0x") || slot.startsWith("0X")) return slot;
+    return "0x" + BigInt("0x" + slot).toString(16);
+}
+
 
 interface EIP1193RequestArguments {
     readonly method: string;
@@ -178,7 +186,7 @@ class RPCProvider implements Provider, EIP1193 {
             method: "eth_getStorageAt",
             params: [
                 address,
-                typeof slot === 'number' ? bytesToHex(slot) : slot,
+                storageSlotParam(slot),
                 fromBlockTagOrNumber(block),
             ],
         });

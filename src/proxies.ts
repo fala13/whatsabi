@@ -299,7 +299,10 @@ export class SequenceWalletProxyResolver extends BaseProxyResolver implements Pr
     override name = "SequenceWalletProxy";
 
     async resolve(provider: StorageProvider, address: string): Promise<string> {
-        return addressFromPadded(await provider.getStorageAt(address, address.toLowerCase().slice(2)));
+        // Slot is the address as a uint256. JSON-RPC quantities must be 0x-prefixed
+        // and must not have leading zeros, or strict nodes return -32602.
+        const slot = "0x" + BigInt(address).toString(16);
+        return addressFromPadded(await provider.getStorageAt(address, slot));
     }
 }
 
