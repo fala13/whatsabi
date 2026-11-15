@@ -63,6 +63,8 @@ describe('loaders: ABILoader', () => {
   online_test('BlockscoutABILoader', async ({ env }) => {
     const loader = new BlockscoutABILoader({
       apiKey: env["BLOCKSCOUT_API_KEY"],
+      // A key routes through the multichain gateway; keyless keeps the legacy instance API
+      chainId: env["BLOCKSCOUT_API_KEY"] ? 1 : undefined,
     });
     const abi = await loader.loadABI("0x7a250d5630b4cf539739df2c5dacb4c659f2488d");
     const selectors = Object.values(selectorsFromABI(abi));
@@ -71,11 +73,13 @@ describe('loaders: ABILoader', () => {
   })
 
   online_test('BlockscoutABILoader_chainId', async ({ env }) => {
+    // Avoid "featured" chains like Base (8453): the gateway gates them behind
+    // paid plans and responds 402 to free-tier keys.
     const loader = new BlockscoutABILoader({
       apiKey: env["BLOCKSCOUT_API_KEY"],
-      chainId: 8453,
+      chainId: 100,
     });
-    const abiPromise = loader.loadABI("0x4200000000000000000000000000000000000006"); // WETH9 predeploy on Base
+    const abiPromise = loader.loadABI("0xe91D153E0b41518A2Ce8Dd3D7944Fa863463a97d"); // WXDAI on Gnosis
     if (!env["BLOCKSCOUT_API_KEY"]) {
       const error = await abiPromise.then(
         () => undefined,
@@ -161,6 +165,8 @@ describe('loaders: ABILoader', () => {
   online_test('BlockscoutABILoader_getContract', async ({ env }) => {
     const loader = new BlockscoutABILoader({
       apiKey: env["BLOCKSCOUT_API_KEY"],
+      // A key routes through the multichain gateway; keyless keeps the legacy instance API
+      chainId: env["BLOCKSCOUT_API_KEY"] ? 1 : undefined,
     });
     const result = await loader.getContract("0x7a250d5630b4cf539739df2c5dacb4c659f2488d");
     const selectors = Object.values(selectorsFromABI(result.abi));
@@ -178,6 +184,8 @@ describe('loaders: ABILoader', () => {
   online_test('BlockscoutABILoader_getContract_UniswapV3Factory', async ({ env }) => {
     const loader = new BlockscoutABILoader({
       apiKey: env["BLOCKSCOUT_API_KEY"],
+      // A key routes through the multichain gateway; keyless keeps the legacy instance API
+      chainId: env["BLOCKSCOUT_API_KEY"] ? 1 : undefined,
     });
     const { abi, name } = await loader.getContract("0x1F98431c8aD98523631AE4a59f267346ea31F984");
     const selectors = Object.values(selectorsFromABI(abi));
@@ -455,6 +463,37 @@ describe('loaders: BlockscoutABILoader', () => {
       });
     },
   );
+
+  test.each(['getContract', 'loadABI'] as const)(
+    '%s retries rate-limited requests',
+    async (method) => {
+      const abi = [{ type: "function", name: "deposit", inputs: [] }];
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce(new Response(
+          JSON.stringify({ error: "Too Many Requests" }),
+          {
+            status: 429,
+            headers: { "Content-Type": "application/json", "Retry-After": "0" },
+          },
+        ))
+        .mockResolvedValueOnce(new Response(
+          JSON.stringify({ abi }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        ));
+      vi.stubGlobal("fetch", fetchMock);
+
+      const loader = new BlockscoutABILoader({
+        baseURL: "https://eth.blockscout.test/api",
+      });
+      const address = "0x0000000000000000000000000000000000000001";
+
+      await expect(loader[method](address)).resolves.toBeDefined();
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    },
+  );
 });
 
 describe_cached("loaders: ABILoader suite", async ({ env }) => {
@@ -485,7 +524,7 @@ describe_cached("loaders: ABILoader suite", async ({ env }) => {
   const loaders = [
     new SourcifyABILoader(),
     new EtherscanV2ABILoader({ apiKey: env["ETHERSCAN_API_KEY"] }),
-    new BlockscoutABILoader({ apiKey: env["BLOCKSCOUT_API_KEY"] }),
+    new BlockscoutABILoader({ apiKey: env["BLOCKSCOUT_API_KEY"], chainId: env["BLOCKSCOUT_API_KEY"] ? 1 : undefined }),
     new AnyABILoader(),
   ];
 

@@ -47,6 +47,13 @@ function fromBlockTagOrNumber(block) {
     }
     return block;
 }
+function storageSlotParam(slot) {
+    if (typeof slot === "number")
+        return (0, utils_js_1.bytesToHex)(slot);
+    if (slot.startsWith("0x") || slot.startsWith("0X"))
+        return slot;
+    return "0x" + BigInt("0x" + slot).toString(16);
+}
 function isCompatibleProvider(provider) {
     return (typeof provider.getStorageAt === "function" &&
         typeof provider.call === "function" &&
@@ -116,7 +123,7 @@ class RPCProvider {
             method: "eth_getStorageAt",
             params: [
                 address,
-                typeof slot === 'number' ? (0, utils_js_1.bytesToHex)(slot) : slot,
+                storageSlotParam(slot),
                 fromBlockTagOrNumber(block),
             ],
         });

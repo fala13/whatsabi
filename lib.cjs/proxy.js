@@ -6,17 +6,32 @@ const proxies_js_1 = require("./proxies.js");
 const disasm_js_1 = require("./disasm.js");
 const opcodes_js_1 = require("./opcodes.js");
 const providers_js_1 = require("./providers.js");
+const fs_1 = require("fs");
+function openProvider(endpoint) {
+    const raw = process.env["MAX_BATCH_RPC_CALLS"];
+    const n = raw == null ? NaN : Number(raw);
+    const batchMaxCount = Number.isInteger(n) && n > 0 ? n : undefined;
+    if (endpoint?.startsWith("ws")) {
+        return batchMaxCount == null
+            ? new ethers_1.ethers.WebSocketProvider(endpoint)
+            : new ethers_1.ethers.WebSocketProvider(endpoint, undefined, { batchMaxCount });
+    }
+    if (endpoint?.startsWith("http")) {
+        return batchMaxCount == null
+            ? new ethers_1.ethers.JsonRpcProvider(endpoint)
+            : new ethers_1.ethers.JsonRpcProvider(endpoint, undefined, { batchMaxCount });
+    }
+    return batchMaxCount == null
+        ? new ethers_1.ethers.IpcSocketProvider(endpoint)
+        : new ethers_1.ethers.IpcSocketProvider(endpoint, undefined, { batchMaxCount });
+}
 async function main() {
     const endpoint = process.argv[3];
-    const rawProvider = endpoint?.startsWith("ws")
-        ? new ethers_1.ethers.WebSocketProvider(endpoint)
-        : endpoint?.startsWith("http")
-            ? new ethers_1.ethers.JsonRpcProvider(endpoint)
-            : new ethers_1.ethers.IpcSocketProvider(endpoint);
-    const provider = (0, providers_js_1.CompatibleProvider)(rawProvider);
     const address = process.env["ADDRESS"] || process.argv[2];
     const selector = "";
-    const code = process.argv[4];
+    const code = (process.argv[4] ?? (0, fs_1.readFileSync)(0, "utf8")).trim();
+    const rawProvider = openProvider(endpoint);
+    const provider = (0, providers_js_1.CompatibleProvider)(rawProvider);
     const program = (0, disasm_js_1.disasm)(code);
     let hasDelegateCall = false;
     for (const fn of Object.values(program.dests)) {

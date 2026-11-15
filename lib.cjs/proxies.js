@@ -1,12 +1,45 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.slotResolvers = exports.slots = exports.FixedProxyResolver = exports.SequenceWalletProxyResolver = exports.PROXIABLEProxyResolver = exports.ZeppelinOSProxyResolver = exports.DiamondProxyResolver = exports.EIP1967ProxyResolver = exports.LegacyUpgradeableProxyResolver = exports.GnosisSafeProxyResolver = exports.BaseProxyResolver = void 0;
+exports.slotPreimages = exports.slotResolvers = exports.slots = exports.FixedProxyResolver = exports.aragonAppProxyImplementationSelector = exports.AragonAppProxyResolver = exports.livepeerManagerProxySelectors = exports.LivepeerManagerProxyResolver = exports.SequenceWalletProxyResolver = exports.MaticProxyResolver = exports.PROXIABLEProxyResolver = exports.ZeppelinOSProxyResolver = exports.DiamondProxyResolver = exports.EIP1967ProxyResolver = exports.LegacyUpgradeableProxyResolver = exports.GnosisSafeProxyResolver = exports.BaseProxyResolver = void 0;
+const Address = __importStar(require("ox/Address"));
 const errors_js_1 = require("./errors.js");
 const slots_js_1 = require("./slots.js");
-const utils_js_1 = require("./utils.js");
 const _zeroAddress = "0x0000000000000000000000000000000000000000";
 function addressFromPadded(data) {
-    return "0x" + data.slice(data.length - 40);
+    return "0x" + wordFrom(data).slice(-40);
 }
 class BaseProxyResolver {
     name;
@@ -97,7 +130,7 @@ class DiamondProxyResolver extends BaseProxyResolver {
             try {
                 const addr = addressFromPadded(await provider.call({
                     to: address,
-                    data: facetSelector + selector,
+                    data: facetSelector + selector.padEnd(64, "0"),
                 }));
                 if (addr !== _zeroAddress)
                     return addr;
@@ -132,7 +165,7 @@ class DiamondProxyResolver extends BaseProxyResolver {
             const facetSelectorsSlot = (0, slots_js_1.joinSlot)([facet, slot]);
             try {
                 const selectors = await (0, slots_js_1.readArray)(provider, address, facetSelectorsSlot, selectorWidth, this.readArrayLimit);
-                facetSelectors[(0, utils_js_1.addressWithChecksum)(facet)] = selectors.map(s => "0x" + s);
+                facetSelectors[Address.checksum(facet)] = selectors.map(s => "0x" + s);
             }
             catch (e) {
                 if (e instanceof errors_js_1.StorageReadError)
@@ -164,13 +197,52 @@ class PROXIABLEProxyResolver extends BaseProxyResolver {
     }
 }
 exports.PROXIABLEProxyResolver = PROXIABLEProxyResolver;
+class MaticProxyResolver extends BaseProxyResolver {
+    name = "MaticProxy";
+    async resolve(provider, address) {
+        return addressFromPadded(await provider.getStorageAt(address, exports.slots.MATIC_IMPL));
+    }
+}
+exports.MaticProxyResolver = MaticProxyResolver;
 class SequenceWalletProxyResolver extends BaseProxyResolver {
     name = "SequenceWalletProxy";
     async resolve(provider, address) {
-        return addressFromPadded(await provider.getStorageAt(address, address.toLowerCase().slice(2)));
+        const slot = "0x" + BigInt(address).toString(16);
+        return addressFromPadded(await provider.getStorageAt(address, slot));
     }
 }
 exports.SequenceWalletProxyResolver = SequenceWalletProxyResolver;
+class LivepeerManagerProxyResolver extends BaseProxyResolver {
+    name = "LivepeerManagerProxy";
+    async resolve(provider, address) {
+        const controller = addressFromWord(await provider.getStorageAt(address, 0));
+        if (controller === _zeroAddress)
+            return _zeroAddress;
+        const targetContractId = wordFrom(await provider.getStorageAt(address, 1));
+        const data = "0xe16c7d98" + targetContractId;
+        return addressFromWord(await provider.call({ to: controller, data }));
+    }
+}
+exports.LivepeerManagerProxyResolver = LivepeerManagerProxyResolver;
+function wordFrom(data) {
+    return (data.startsWith("0x") ? data.slice(2) : data).padStart(64, "0");
+}
+function addressFromWord(data) {
+    return addressFromPadded(wordFrom(data));
+}
+exports.livepeerManagerProxySelectors = [
+    "0xf77c4791",
+    "0x92eefe9b",
+    "0x51720b41",
+];
+class AragonAppProxyResolver extends BaseProxyResolver {
+    name = "AragonAppProxy";
+    async resolve(provider, address) {
+        return addressFromWord(await provider.call({ to: address, data: exports.aragonAppProxyImplementationSelector }));
+    }
+}
+exports.AragonAppProxyResolver = AragonAppProxyResolver;
+exports.aragonAppProxyImplementationSelector = "0x5c60da1b";
 class FixedProxyResolver extends BaseProxyResolver {
     name = "FixedProxy";
     resolvedAddress;
@@ -192,6 +264,8 @@ exports.slots = {
     GNOSIS_SAFE_SELECTOR: "0xa619486e00000000000000000000000000000000000000000000000000000000",
     DIAMOND_STORAGE: "0xc8fcad8db84d3cc18b4c41d551ea0ee66dd599cde068d998e57d5e09332c131b",
     DIAMOND_STORAGE_1: "0xc8fcad8db84d3cc18b4c41d551ea0ee66dd599cde068d998e57d5e09332c131c",
+    MATIC_IMPL: "0xbaab7dbf64751104133af04abc7d9979f0fda3b059a322a8333f533d3f32bf7f",
+    ARAGON_KERNEL: "0x4172f0f7d2289153072b0a6ca36959e0cbe2efc3afe50fc81636caa96338137b",
 };
 exports.slotResolvers = {
     [exports.slots.EIP1967_IMPL]: new EIP1967ProxyResolver("EIP1967Proxy"),
@@ -201,7 +275,12 @@ exports.slotResolvers = {
     [exports.slots.GNOSIS_SAFE_SELECTOR]: new GnosisSafeProxyResolver("GnosisSafeProxy"),
     [exports.slots.DIAMOND_STORAGE]: new DiamondProxyResolver("DiamondProxy"),
     [exports.slots.DIAMOND_STORAGE_1]: new DiamondProxyResolver("DiamondProxy", exports.slots.DIAMOND_STORAGE_1),
+    [exports.slots.MATIC_IMPL]: new MaticProxyResolver("MaticProxy"),
+    [exports.slots.ARAGON_KERNEL]: new AragonAppProxyResolver("AragonAppProxy"),
     "0xc8fcad8db84d3cc18b4c41d551ea0ee66dd599cde068d998e57d5e09332c131d": new DiamondProxyResolver("DiamondProxy"),
     "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbd": new EIP1967ProxyResolver("EIP1967Proxy"),
+};
+exports.slotPreimages = {
+    "0x6d617469632e6e6574776f726b2e70726f78792e696d706c656d656e746174696f6e": exports.slotResolvers[exports.slots.MATIC_IMPL],
 };
 //# sourceMappingURL=proxies.js.map

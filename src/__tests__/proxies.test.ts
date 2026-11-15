@@ -1,12 +1,15 @@
 import { expect, describe, test } from 'vitest';
 
+import * as Hash from 'ox/Hash';
+
 import { cached_test, online_test, makeProvider } from './env';
 
 import { disasm } from '../disasm';
 import { addSlotOffset, readArray, joinSlot } from "../slots.js";
+import { bytesToHex } from '../utils';
 import * as proxies from '../proxies';
 
-import { ZEPPELINOS_USDC, WANDERWING } from './__fixtures__/proxies'
+import { ZEPPELINOS_USDC, WANDERWING, LIVEPEER_MANAGER_PROXY, ARAGON_APP_PROXY } from './__fixtures__/proxies'
 
 // TODO: Test for proxy factories to not match
 
@@ -52,6 +55,19 @@ describe('proxy detection', () => {
         expect(program.proxies[0]).toBeInstanceOf(proxies.SequenceWalletProxyResolver);
     });
 
+    test('SequenceWallet Proxy: uses a prefixed address-keyed slot', async () => {
+        const address = "0x00Cd000000000000000000000000000000001234";
+        const resolver = new proxies.SequenceWalletProxyResolver();
+        const provider = {
+            getStorageAt: async (_address: string, slot: number | string) => {
+                expect(slot).toBe("0xcd000000000000000000000000000000001234");
+                return "0x" + "00".repeat(32);
+            },
+        };
+
+        await resolver.resolve(provider, address);
+    });
+
     test('Gnosis Safe Proxy Factory', async () => {
         // https://eips.ethereum.org/EIPS/eip-1167
         const bytecode = "0x608060405273ffffffffffffffffffffffffffffffffffffffff600054167fa619486e0000000000000000000000000000000000000000000000000000000060003514156050578060005260206000f35b3660008037600080366000845af43d6000803e60008114156070573d6000fd5b3d6000f3fea265627a7a72315820d8a00dc4fe6bf675a9d7416fc2d00bb3433362aa8186b750f76c4027269667ff64736f6c634300050e0032";
@@ -75,7 +91,244 @@ describe('proxy detection', () => {
     });
 });
 
+describe('proxy detection in the data segment', () => {
+    // These are hand-built bytecodes for exercising the scan that looks for known
+    // proxy slots in the data that lives after the end of the program:
+    //
+    //   600080fd        PUSH1 0x00 DUP1 REVERT   <- program, ends in a halt
+    //   <data segment>                           <- everything after the halt
+    //
+    // We only reach that scan when no proxy was found in the program itself, so
+    // the program here is deliberately trivial.
+    const HALTING_PROGRAM = "600080fd";
+
+    // Filler so that the data segment is long enough to be scanned even when the
+    // end boundary is computed too aggressively.
+    const FILLER = "11".repeat(32);
+
+    // A solc-style CBOR metadata blob followed by its 2-byte big-endian length,
+    // which is what solc appends to runtime bytecode:
+    //   {"ipfs": <34-byte multihash>, "solc": <3 bytes>}
+    // The blob itself is 51 bytes here, same as the real-world contract that
+    // prompted this test, so the trailing length bytes are 0x0033.
+    function cborMetadata(digest: string): string {
+        const blob =
+            "a2" +                       // map(2)
+            "64" + "69706673" +          // "ipfs"
+            "5822" + "1220" + digest +   // bytes(34): sha2-256 multihash
+            "64" + "736f6c63" +          // "solc"
+            "43" + "000606";             // bytes(3): 0.6.6
+        const length = blob.length / 2;
+        return blob + length.toString(16).padStart(4, "0");
+    }
+
+    const EIP1967_IMPL = proxies.slots.EIP1967_IMPL.slice(2);
+
+    test('Slot ending flush against the CBOR metadata', async () => {
+        // The slot value is the last thing before the metadata blob, so any
+        // over-trimming of the metadata clips the tail of the slot and hides it.
+        const bytecode = "0x" + HALTING_PROGRAM + FILLER + EIP1967_IMPL + cborMetadata("aa".repeat(32));
+
+        const program = disasm(bytecode);
+        expect(program.proxies.map(p => p.name)).toEqual(["EIP1967Proxy"]);
+    });
+
+    test('Slot inside the CBOR metadata is not a match', async () => {
+        // Same shape, except the slot value only appears within the metadata blob.
+        // Metadata is compiler output, not program data, so it stays out of the scan.
+        const bytecode = "0x" + HALTING_PROGRAM + FILLER + FILLER + cborMetadata(EIP1967_IMPL);
+
+        const program = disasm(bytecode);
+        expect(program.proxies).toEqual([]);
+    });
+
+    test('Trailing bytes that are not a CBOR length', async () => {
+        // Creation bytecode ends with constructor arguments, not with a metadata
+        // length. Here the final 2 bytes (0x99a7) would be read as a 39335-byte
+        // blob, which is longer than the whole bytecode.
+        const constructorArgs = "000000000000000000000000490e379c9cff64944be82b849f8fd5972c7999a7";
+        const bytecode = "0x" + HALTING_PROGRAM + FILLER + EIP1967_IMPL + cborMetadata("aa".repeat(32)) + constructorArgs;
+
+        const program = disasm(bytecode);
+        expect(program.proxies.map(p => p.name)).toEqual(["EIP1967Proxy"]);
+    });
+
+    // Polygon's UpgradableProxy hashes this string at runtime instead of embedding
+    // the slot value, so the data segment carries the string and not the hash.
+    const MATIC_SLOT_STRING = "matic.network.proxy.implementation";
+    const MATIC_PREIMAGE = bytesToHex(new TextEncoder().encode(MATIC_SLOT_STRING)).slice(2);
+
+    test('Slot pre-image in the data segment is a match', async () => {
+        const bytecode = "0x" + HALTING_PROGRAM + FILLER + MATIC_PREIMAGE + cborMetadata("aa".repeat(32));
+
+        const program = disasm(bytecode);
+        expect(program.proxies.map(p => p.name)).toEqual(["MaticProxy"]);
+    });
+
+    test('Matic slot value in the data segment is a match', async () => {
+        // A solc new enough to fold the keccak256 into a constant emits the slot
+        // value itself, which the ordinary slot scan picks up without the pre-image.
+        const bytecode = "0x" + HALTING_PROGRAM + FILLER + proxies.slots.MATIC_IMPL.slice(2) + cborMetadata("aa".repeat(32));
+
+        const program = disasm(bytecode);
+        expect(program.proxies.map(p => p.name)).toEqual(["MaticProxy"]);
+    });
+
+    test('Matic pre-image and slot constants agree', async () => {
+        // Both constants are opaque hex in the source. Pin them to the string they
+        // are derived from, so a typo fails here instead of silently never matching.
+        expect(Object.keys(proxies.slotPreimages)).toContain("0x" + MATIC_PREIMAGE);
+        expect(Hash.keccak256(new TextEncoder().encode(MATIC_SLOT_STRING), { as: "Hex" })).toEqual(proxies.slots.MATIC_IMPL);
+    });
+
+    test('Livepeer ManagerProxy', async () => {
+        // No namespaced slot to match on: the implementation pointer lives in a
+        // registry contract, so detection keys on the dispatch table instead.
+        const program = disasm("0x" + LIVEPEER_MANAGER_PROXY);
+
+        expect(Object.keys(program.selectors).sort()).toEqual(proxies.livepeerManagerProxySelectors.sort());
+        expect(program.proxies.map(p => p.name)).toEqual(["LivepeerManagerProxy"]);
+    });
+
+    test('Livepeer ManagerProxy: resolves regardless of storage word prefixing', async () => {
+        // Providers differ on whether getStorageAt prefixes the word. Sourcify's own
+        // test doubles return it unprefixed, so both forms have to resolve the same.
+        //
+        // Assert the calldata, not just the address that comes back. The target id's
+        // first byte is significant, so a resolver that blindly drops two characters
+        // from an unprefixed word asks the registry about a key that does not exist,
+        // and a call double that ignores its argument cannot see that happen.
+        const resolver = new proxies.LivepeerManagerProxyResolver();
+        const controller = "000000000000000000000000d8e8328501e9645d16cf49539efc04f734606ee4";
+        // keccak256("BondingManagerTarget")
+        const targetContractId = "fc6f6f33d2bb065ac61cbdd4dbe4b7adf6f3e7e6c6a3d1fe297cbf9a187092e4";
+        const implementation = "000000000000000000000000be197fcbfe74de8f10460ea61644b006cc0f0bd2";
+
+        for (const prefix of ["0x", ""]) {
+            const stub = {
+                getStorageAt: async (_address: string, slot: number | string) =>
+                    prefix + (Number(slot) === 0 ? controller : targetContractId),
+                call: async (tx: { to: string, data: string }) => {
+                    expect(tx.to).toEqual("0xd8e8328501e9645d16cf49539efc04f734606ee4");
+                    expect(tx.data).toEqual("0xe16c7d98" + targetContractId);
+                    return prefix + implementation;
+                },
+            };
+
+            const got = await resolver.resolve(stub, "0x35Bcf3c30594191d53231E4FF333E8A770453e40");
+            expect(got).toEqual("0xbe197fcbfe74de8f10460ea61644b006cc0f0bd2");
+        }
+    });
+
+    test('Aragon AppProxyUpgradeable', async () => {
+        const program = disasm("0x" + ARAGON_APP_PROXY);
+
+        expect(proxies.aragonAppProxyImplementationSelector in program.selectors).toBe(true);
+        expect(program.proxies.map(p => p.name)).toEqual(["AragonAppProxy"]);
+    });
+
+    test('Aragon AppProxy: kernel slot without implementation() is not a proxy', async () => {
+        // An aragonOS app implementation reads the same kernel slot as its proxy but
+        // has no implementation() in its dispatch table. Take the proxy's bytecode
+        // and swap the implementation() selector in the jump table for one it does
+        // not otherwise have, so only the dispatch table changes.
+        const selector = proxies.aragonAppProxyImplementationSelector.slice(2);
+        const before = disasm("0x" + ARAGON_APP_PROXY);
+        expect(before.proxies.map(p => p.name)).toEqual(["AragonAppProxy"]);
+
+        const swapped = ARAGON_APP_PROXY.replace("63" + selector, "63deadbeef");
+        expect(swapped).not.toEqual(ARAGON_APP_PROXY);
+        const after = disasm("0x" + swapped);
+        expect(selector in after.selectors).toBe(false);
+        expect(after.proxies).toEqual([]);
+    });
+
+    test('Aragon AppProxy: resolves with one implementation() call to the proxy', async () => {
+        const resolver = new proxies.AragonAppProxyResolver();
+        const address = "0xae7ab96520DE3A18E5e111B5EaAb095312D7fE84";
+        const implementation = "000000000000000000000000028271e30a695c0527a0c50ca30603fed004cdb0";
+
+        for (const prefix of ["0x", ""]) {
+            const stub = {
+                call: async (tx: { to: string, data: string }) => {
+                    expect(tx.to).toEqual(address);
+                    expect(tx.data).toEqual("0x5c60da1b");
+                    return prefix + implementation;
+                },
+            };
+
+            const got = await resolver.resolve(stub, address);
+            expect(got).toEqual("0x028271e30a695c0527a0c50ca30603fed004cdb0");
+        }
+    });
+
+    test('Livepeer ManagerProxy: a short storage response resolves to nothing', async () => {
+        // A provider that answers "0x" rather than a zero word would otherwise produce
+        // a malformed address that still reads as non-zero to the caller.
+        const resolver = new proxies.LivepeerManagerProxyResolver();
+        const stub = {
+            getStorageAt: async () => "0x",
+            call: async () => "0x",
+        };
+
+        const got = await resolver.resolve(stub, "0x35Bcf3c30594191d53231E4FF333E8A770453e40");
+        expect(got).toEqual("0x0000000000000000000000000000000000000000");
+    });
+});
+
+describe('metadata extraction', () => {
+    const HALTING_PROGRAM = "600080fd";
+    const FILLER = "11".repeat(32);
+
+    test('solc {ipfs, solc} metadata is extracted', async () => {
+        const digest = "ab".repeat(32);
+        const metadata =
+            "a2" +                       // map(2)
+            "64" + "69706673" +          // "ipfs"
+            "5822" + "1220" + digest +   // bytes(34): sha2-256 multihash
+            "64" + "736f6c63" +          // "solc"
+            "43" + "000606" +            // bytes(3): 0.6.6
+            "0033";                      // 51-byte blob length
+        const bytecode = "0x" + HALTING_PROGRAM + FILLER + metadata;
+
+        const program = disasm(bytecode);
+        expect(program.metadata).toEqual({
+            ipfs: "0x1220" + digest,
+            solc: "0x000606",
+        });
+    });
+
+    test('no metadata extracted from constructor arguments', async () => {
+        // Creation bytecode tail is constructor arguments, not CBOR metadata.
+        const constructorArgs = "000000000000000000000000490e379c9cff64944be82b849f8fd5972c7999a7";
+        const bytecode = "0x" + HALTING_PROGRAM + FILLER + constructorArgs;
+
+        const program = disasm(bytecode);
+        expect(program.metadata).toBeUndefined();
+    });
+});
+
 describe('known proxy resolving', () => {
+    test('Diamond Proxy: ABI-pads selector arguments and ignores empty responses', async () => {
+        const selector = "0x12345678";
+        const calldata: string[] = [];
+        const provider = {
+            getStorageAt: async () => "0x" + "00".repeat(32),
+            call: async (tx: { data: string }) => {
+                calldata.push(tx.data);
+                return calldata.length === 1 ? "0x" : "0x" + "00".repeat(12) + "11".repeat(20);
+            },
+        };
+
+        const got = await new proxies.DiamondProxyResolver("DiamondProxy").resolve(provider, "0x" + "22".repeat(20), selector);
+
+        expect(calldata).toEqual([
+            "0xcdffacc6" + selector.slice(2).padEnd(64, "0"),
+            "0x0d741577" + selector.slice(2).padEnd(64, "0"),
+        ]);
+        expect(got).toBe("0x" + "11".repeat(20));
+    });
+
     online_test('Safe: Proxy Factory 1.1.1', async ({ provider }) => {
         const address = "0x655a9e6b044d6b62f393f9990ec3ea877e966e18";
         // Need to call masterCopy() or getStorageAt for 0th slot
@@ -185,6 +438,90 @@ describe('contract proxy resolving', () => {
 
         const wantImplementation = "0x9c13e225ae007731caa49fd17a41379ab1a489f4";
         expect(got).toEqual(wantImplementation);
+    });
+
+    cached_test('Matic Proxy: DAI on Polygon', async ({ withCache }) => {
+        // Polygon PoS bridged tokens use Polygon's own UpgradableProxy. The slot is
+        // keccak256("matic.network.proxy.implementation"), computed at runtime by
+        // solc 0.6.6, so only the pre-image scan finds it.
+        const provider = makeProvider("https://polygon-bor-rpc.publicnode.com");
+        const address = "0x8f3cf7ad23cd3cadbd9735aff958023239c6a063";
+        const code = await withCache(
+            `polygon-${address}_code`,
+            async () => {
+                return await provider.getCode(address)
+            },
+        );
+
+        const program = disasm(code);
+        expect(program.proxies.map(p => p.name)).toEqual(["MaticProxy"]);
+
+        const resolver = program.proxies[0];
+        const got = await resolver.resolve(provider, address);
+
+        const wantImplementation = "0x490e379c9cff64944be82b849f8fd5972c7999a7";
+        expect(got).toEqual(wantImplementation);
+    });
+
+    cached_test('Livepeer ManagerProxy: BondingManager on Arbitrum', async ({ withCache }) => {
+        const provider = makeProvider("https://arb1.arbitrum.io/rpc");
+        const address = "0x35Bcf3c30594191d53231E4FF333E8A770453e40";
+        const code = await withCache(
+            `arbitrum-${address}_code`,
+            async () => {
+                return await provider.getCode(address)
+            },
+        );
+
+        const program = disasm(code);
+        expect(program.proxies.map(p => p.name)).toEqual(["LivepeerManagerProxy"]);
+
+        const resolver = program.proxies[0];
+        const got = await resolver.resolve(provider, address);
+
+        const wantImplementation = "0xbe197fcbfe74de8f10460ea61644b006cc0f0bd2";
+        expect(got).toEqual(wantImplementation);
+
+        // The target inherits controller(), setController(address) and
+        // targetContractId() from the same base contract, so it carries all three
+        // selectors too. Matching a subset would call every Livepeer manager
+        // implementation a proxy, so check the implementation stays unmatched.
+        const implCode = await withCache(
+            `arbitrum-${wantImplementation}_code`,
+            async () => {
+                return await provider.getCode(wantImplementation)
+            },
+        );
+        expect(disasm(implCode).proxies).toEqual([]);
+    });
+
+    cached_test('Aragon AppProxyUpgradeable: Lido stETH on mainnet', async ({ provider, withCache }) => {
+        const address = "0xae7ab96520DE3A18E5e111B5EaAb095312D7fE84";
+        const code = await withCache(
+            `${address}_code`,
+            async () => {
+                return await provider.getCode(address)
+            },
+        );
+
+        const program = disasm(code);
+        expect(program.proxies.map(p => p.name)).toEqual(["AragonAppProxy"]);
+
+        const resolver = program.proxies[0];
+        const got = await resolver.resolve(provider, address);
+
+        const wantImplementation = "0x028271e30a695c0527a0c50ca30603fed004cdb0";
+        expect(got).toEqual(wantImplementation);
+
+        // The app behind the proxy reads the same kernel slot, so check that the
+        // implementation stays unmatched.
+        const implCode = await withCache(
+            `${wantImplementation}_code`,
+            async () => {
+                return await provider.getCode(wantImplementation)
+            },
+        );
+        expect(disasm(implCode).proxies).toEqual([]);
     });
 });
 

@@ -49,10 +49,11 @@
  * const facets = await diamondResolver.facets(provider, address); // All possible address -> selector[] mappings
  * ```
  */
+import * as Address from 'ox/Address';
+
 import type { StorageProvider, CallProvider } from "./providers.js";
 import { StorageReadError } from "./errors.js";
 import { addSlotOffset, readArray, joinSlot } from "./slots.js";
-import { addressWithChecksum } from "./utils.js";
 
 export interface ProxyResolver {
     readonly name: string;
@@ -67,7 +68,7 @@ const _zeroAddress = "0x0000000000000000000000000000000000000000";
 
 // Convert 32 byte hex to a 20 byte hex address
 function addressFromPadded(data:string): string {
-    return "0x" + data.slice(data.length - 40);
+    return "0x" + wordFrom(data).slice(-40);
 }
 
 
@@ -188,7 +189,7 @@ export class DiamondProxyResolver extends BaseProxyResolver implements ProxyReso
             try {
                 const addr = addressFromPadded(await provider.call({
                     to: address,
-                    data: facetSelector + selector,
+                    data: facetSelector + selector.padEnd(64, "0"),
                 }));
                 if (addr !== _zeroAddress) return addr;
             } catch (e: any) {
@@ -256,7 +257,7 @@ export class DiamondProxyResolver extends BaseProxyResolver implements ProxyReso
             const facetSelectorsSlot = joinSlot([facet, slot]);
             try {
                 const selectors = await readArray(provider, address, facetSelectorsSlot, selectorWidth, this.readArrayLimit);
-                facetSelectors[addressWithChecksum(facet)] = selectors.map(s => "0x" + s);
+                facetSelectors[Address.checksum(facet)] = selectors.map(s => "0x" + s);
             } catch (e) {
                 if (e instanceof StorageReadError) continue;
                 throw e;
@@ -293,18 +294,87 @@ export class PROXIABLEProxyResolver extends BaseProxyResolver implements ProxyRe
     }
 }
 
+// https://github.com/maticnetwork/pos-portal/blob/master/contracts/common/Proxy/UpgradableProxy.sol
+// Used by the Polygon PoS bridge child tokens. Implementation pointer is stored
+// in a Matic-namespaced slot rather than the EIP-1967 one.
+export class MaticProxyResolver extends BaseProxyResolver implements ProxyResolver {
+    override name = "MaticProxy";
+
+    async resolve(provider: StorageProvider, address: string): Promise<string> {
+        return addressFromPadded(await provider.getStorageAt(address, slots.MATIC_IMPL));
+    }
+}
+
 // https://github.com/0xsequence/wallet-contracts/blob/master/contracts/Wallet.sol
 // Implementation pointer is stored in slot keyed on the deployed address.
 export class SequenceWalletProxyResolver extends BaseProxyResolver implements ProxyResolver {
     override name = "SequenceWalletProxy";
 
     async resolve(provider: StorageProvider, address: string): Promise<string> {
-        // Slot is the address as a uint256. JSON-RPC quantities must be 0x-prefixed
-        // and must not have leading zeros, or strict nodes return -32602.
+        // JSON-RPC quantities require a 0x prefix and no leading zeros.
         const slot = "0x" + BigInt(address).toString(16);
         return addressFromPadded(await provider.getStorageAt(address, slot));
     }
 }
+
+// https://github.com/livepeer/protocol/blob/master/contracts/ManagerProxy.sol
+// Livepeer's managers sit behind a proxy that has no namespaced slot to match on.
+// It stores the Controller in slot 0 and the target's registry key in slot 1, and
+// its fallback delegates to controller.getContract(targetContractId).
+export class LivepeerManagerProxyResolver extends BaseProxyResolver implements ProxyResolver {
+    override name = "LivepeerManagerProxy";
+
+    async resolve(provider: StorageProvider & CallProvider, address: string): Promise<string> {
+        const controller = addressFromWord(await provider.getStorageAt(address, 0));
+        if (controller === _zeroAddress) return _zeroAddress;
+
+        const targetContractId = wordFrom(await provider.getStorageAt(address, 1));
+        const data = "0xe16c7d98" + targetContractId; // getContract(bytes32)
+
+        return addressFromWord(await provider.call({ to: controller, data }));
+    }
+}
+
+// Providers differ on whether they prefix a storage word, and some drop leading
+// zeros. Normalise to a bare 32 byte word before reading an address out of it or
+// putting it into calldata: an unprefixed word whose first byte is significant
+// loses that byte to a naive slice(2), which silently asks the registry about the
+// wrong key.
+function wordFrom(data: string): string {
+    return (data.startsWith("0x") ? data.slice(2) : data).padStart(64, "0");
+}
+
+function addressFromWord(data: string): string {
+    return addressFromPadded(wordFrom(data));
+}
+
+// The full external surface of a Livepeer ManagerProxy: controller(),
+// setController(address) and targetContractId(). Everything else reaches the
+// target through the fallback.
+export const livepeerManagerProxySelectors = [
+    "0xf77c4791", // controller()
+    "0x92eefe9b", // setController(address)
+    "0x51720b41", // targetContractId()
+];
+
+// https://github.com/aragon/aragonOS/blob/v4.4.0/contracts/apps/AppProxyBase.sol
+// aragonOS apps sit behind AppProxyUpgradeable or AppProxyPinned. The proxy keeps
+// the kernel address and the app id in Aragon-namespaced slots and asks the kernel
+// for the app's base contract (AppProxyPinned pins that answer at construction).
+// Both variants implement ERC-897, so one implementation() call on the proxy
+// returns the right address for either.
+export class AragonAppProxyResolver extends BaseProxyResolver implements ProxyResolver {
+    override name = "AragonAppProxy";
+
+    async resolve(provider: CallProvider, address: string): Promise<string> {
+        return addressFromWord(await provider.call({ to: address, data: aragonAppProxyImplementationSelector }));
+    }
+}
+
+// ERC-897 implementation(). The apps behind an Aragon proxy (AragonApp) read the
+// same kernel slot as the proxy, so the slot alone cannot tell the two apart; the
+// proxy's dispatch table carries this selector and the app's does not.
+export const aragonAppProxyImplementationSelector = "0x5c60da1b";
 
 // FixedProxyResolver is used when we already know the resolved address
 // No additional resolving required
@@ -364,6 +434,18 @@ export const slots : Record<string, string> = {
     // Same as above but some implementations don't do -1
     DIAMOND_STORAGE_1: "0xc8fcad8db84d3cc18b4c41d551ea0ee66dd599cde068d998e57d5e09332c131c",
 
+    // Polygon (Matic) UpgradableProxy, used by the PoS bridge child tokens
+    // https://github.com/maticnetwork/pos-portal/blob/master/contracts/common/Proxy/UpgradableProxy.sol
+    // keccak256("matic.network.proxy.implementation")
+    MATIC_IMPL: "0xbaab7dbf64751104133af04abc7d9979f0fda3b059a322a8333f533d3f32bf7f",
+
+    // aragonOS AppProxyUpgradeable / AppProxyPinned
+    // https://github.com/aragon/aragonOS/blob/v4.4.0/contracts/apps/AppStorage.sol
+    // keccak256("aragonOS.appStorage.kernel")
+    // The app id sits next to it in keccak256("aragonOS.appStorage.appId"), but the
+    // kernel slot is enough to key on.
+    ARAGON_KERNEL: "0x4172f0f7d2289153072b0a6ca36959e0cbe2efc3afe50fc81636caa96338137b",
+
     // EIP-1167 minimal proxy standard
     // Parsed in disasm
 }
@@ -377,6 +459,8 @@ export const slotResolvers : Record<string, ProxyResolver> = {
     [slots.GNOSIS_SAFE_SELECTOR]: new GnosisSafeProxyResolver("GnosisSafeProxy"),
     [slots.DIAMOND_STORAGE]: new DiamondProxyResolver("DiamondProxy"),
     [slots.DIAMOND_STORAGE_1]: new DiamondProxyResolver("DiamondProxy", slots.DIAMOND_STORAGE_1),
+    [slots.MATIC_IMPL]: new MaticProxyResolver("MaticProxy"),
+    [slots.ARAGON_KERNEL]: new AragonAppProxyResolver("AragonAppProxy"),
 
     // Not sure why, there's a compiler optimization that adds 1 or 2 to the normal slot?
     // Would love to understand this, if people have ideas
@@ -384,4 +468,29 @@ export const slotResolvers : Record<string, ProxyResolver> = {
 
     // Off-by-one slot version of EIP1967, some examples in the wild who choose to do the -1 at runtime (See issue #178)
     "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbd": new EIP1967ProxyResolver("EIP1967Proxy"),
+};
+
+
+/**
+ * Slot pre-images to look for in the data segment, mapped to the resolver for
+ * the slot they hash to.
+ *
+ * Normally a proxy embeds its slot as a PUSH32 constant, and we match that value
+ * directly via {@link slotResolvers}. Some proxies instead keep the pre-image
+ * string in their data segment and hash it at runtime, so the slot value never
+ * appears in the bytecode at all and there is nothing for that scan to match.
+ *
+ * This happens when the source writes the slot as an expression rather than as a
+ * hex literal, and the compiler does not fold it. Polygon's UpgradableProxy is
+ * one such contract: it declares the slot as
+ * `keccak256("matic.network.proxy.implementation")` and solc 0.6.6 inlines that
+ * expression at each use site, so the string ships and the hash is computed on
+ * every call.
+ *
+ * Keys are the hex encoding of the ASCII pre-image, so that the data segment
+ * scan in disasm can match them the same way it matches slot values.
+ */
+export const slotPreimages : Record<string, ProxyResolver> = {
+    // "matic.network.proxy.implementation" -> slots.MATIC_IMPL
+    "0x6d617469632e6e6574776f726b2e70726f78792e696d706c656d656e746174696f6e": slotResolvers[slots.MATIC_IMPL],
 };

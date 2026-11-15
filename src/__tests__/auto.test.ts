@@ -2,6 +2,7 @@ import { expect } from "vitest";
 
 import { whatsabi } from "../index";
 import { autoload } from "../auto";
+import { slots } from "../proxies";
 
 import { test, online_test, cached_test, makeProvider } from "./env";
 
@@ -24,6 +25,85 @@ test('autoload sets hasCode to false if code is empty', async () => {
     const address = "0x00000000219ab540356cBB839Cbe05303d7705Fa"
     await expect(autoload(address, { provider: fakeProvider("0x") })).resolves.toMatchObject({ hasCode: false });
     await expect(autoload(address, { provider: fakeProvider("0x1234") })).resolves.toMatchObject({ hasCode: true });
+});
+
+test('autoload enriches event signatures as events', async () => {
+    const address = "0x00000000219ab540356cBB839Cbe05303d7705Fa";
+    const hash = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
+    const provider = {
+        request: () => "0x7f" + hash.slice(2) + "a100",
+    };
+    const signatureLookup = {
+        loadFunctions: async () => [],
+        loadEvents: async (candidate: string) => {
+            expect(candidate).toBe(hash);
+            return ["Transfer(address,address,uint256)"];
+        },
+    };
+
+    const result = await autoload(address, {
+        provider,
+        abiLoader: false,
+        signatureLookup,
+        enableExperimentalMetadata: true,
+    });
+
+    expect(result.abi).toContainEqual({
+        type: "event",
+        hash,
+        name: "Transfer",
+        sig: "Transfer(address,address,uint256)",
+        inputs: [
+            { type: "address" },
+            { type: "address" },
+            { type: "uint256" },
+        ],
+    });
+});
+
+test('autoload stops following a proxy cycle', async () => {
+    const address = "0x1111111111111111111111111111111111111111";
+    const bytecode = "0x7f" + slots.EIP1967_IMPL.slice(2) + "00";
+    let fetchedCode = false;
+    const provider = {
+        getCode: async () => {
+            expect(fetchedCode).toBe(false);
+            fetchedCode = true;
+            return bytecode;
+        },
+        getStorageAt: async () => "0x" + "00".repeat(12) + address.slice(2),
+        call: async () => "0x",
+        getAddress: async (name: string) => name,
+    };
+
+    const result = await autoload(address, {
+        provider,
+        abiLoader: false,
+        signatureLookup: false,
+        followProxies: true,
+        onError: () => {},
+    });
+
+    expect(result.address).toBe(address);
+});
+
+test('autoload does not follow a zero-address proxy resolution', async () => {
+    const address = "0x2222222222222222222222222222222222222222";
+    const bytecode = "0x7f" + slots.EIP1967_IMPL.slice(2) + "00";
+    const provider = {
+        request: ({ method, params }: { method: string, params: string[] }) =>
+            method === "eth_getCode" && params[0] === address ? bytecode : "0x" + "00".repeat(32),
+    };
+
+    const result = await autoload(address, {
+        provider,
+        abiLoader: false,
+        signatureLookup: false,
+        followProxies: true,
+        onError: () => {},
+    });
+
+    expect(result.address).toBe(address);
 });
 
 online_test('autoload selectors', async ({ provider }) => {

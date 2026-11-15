@@ -6,7 +6,7 @@ import { hexToBytes, bytesToHex } from "./utils.js";
 
 import { opcodes, pushWidth, isPush, isLog, isHalt, isCompare } from "./opcodes.js";
 
-import { slotResolvers, SequenceWalletProxyResolver, FixedProxyResolver } from "./proxies.js";
+import { slotResolvers, slotPreimages, SequenceWalletProxyResolver, FixedProxyResolver, LivepeerManagerProxyResolver, livepeerManagerProxySelectors, AragonAppProxyResolver, aragonAppProxyImplementationSelector } from "./proxies.js";
 
 
 function valueToOffset(value: Uint8Array): number {
@@ -155,6 +155,7 @@ export class Program {
     proxies: Array<ProxyResolver>;
     isFactory: boolean; // CREATE or CREATE2 detected
     sstoreCount: number; // Number of SSTORE instructions detected, used to determine if this may be a destination contract (vs a proxy)
+    metadata?: Record<string, string>; // CBOR metadata at the end of the contract
 
     init?: Program; // Program embedded as init code
 
@@ -311,7 +312,7 @@ export function disasm(bytecode: string, config?: {onlyJumpTable: boolean}): Pro
                 if (checkJumpTable && Object.keys(p.selectors).length > 0) {
                     checkJumpTable = false;
                 }
-                if (resumeJumpTable.delete(pos)) {
+                if (resumeJumpTable.delete(pos - runtimeOffset)) {
                     // Continuation of a previous jump table?
                     // Selector branch trees start by pushing CALLDATALOAD or it was pushed before.
                     checkJumpTable = code.at(pos + 1) === opcodes.DUP1 || code.at(pos + 1) === opcodes.CALLDATALOAD;
@@ -336,7 +337,7 @@ export function disasm(bytecode: string, config?: {onlyJumpTable: boolean}): Pro
                 code.at(pos + 2) === opcodes.DUP1 &&
                 code.at(pos + 3) === opcodes.ISZERO
             ) {
-                p.notPayable[pos] = step;
+                p.notPayable[pos - runtimeOffset] = step;
                 // TODO: Optimization: Could seek ahead 3 pos/count safely
             }
 
@@ -360,7 +361,7 @@ export function disasm(bytecode: string, config?: {onlyJumpTable: boolean}): Pro
             // Detect simple JUMP/JUMPI helper subroutines
             if ((inst === opcodes.JUMP || inst === opcodes.JUMPI) && isPush(code.at(-2))) {
                 const jumpOffset = valueToOffset(code.valueAt(-2));
-                currentFunction.jumps.push(jumpOffset - runtimeOffset);
+                currentFunction.jumps.push(jumpOffset);
                 maxJumpDest = Math.max(maxJumpDest, jumpOffset);
             }
 
@@ -522,22 +523,41 @@ export function disasm(bytecode: string, config?: {onlyJumpTable: boolean}): Pro
         }
     }
 
+    let endBoundary : number|undefined = undefined;
+    const finalByte = code.bytecode.slice(-1)[0];
+    // Try to detect CBOR metadata (vs bytecode that does not include it)
+    // https://playground.sourcify.dev/
+    if (!isHalt(finalByte) || code.bytecode.slice(-2)[0] === 0) {
+        const cborLength = valueToOffset(code.bytecode.slice(-2));
+        const metadataLength = cborLength + 2; // +2 for the length bytes, which are not counted in cborLength
+        const blobStart = code.bytecode.length - metadataLength;
+
+        // The trailing 2 bytes are only a CBOR length if the blob they imply fits
+        // inside the data segment and starts with a CBOR map header (solc emits
+        // 0xa1/0xa2/0xa3). If we were handed creation bytecode then the tail is
+        // constructor arguments and this number is meaningless, in which case we'd
+        // rather not trim at all than trim garbage.
+        const looksLikeCBOR = blobStart >= boundaryPos && (code.bytecode[blobStart] & 0xe0) === 0xa0;
+        if (looksLikeCBOR) {
+            endBoundary = -metadataLength;
+
+            const cborData = code.bytecode.slice(blobStart, -2);
+            if (cborData.length === 51) {
+                // We're going to cheat if we suspect it's {ipfs, solc}
+                p.metadata = {
+                    ipfs: bytesToHex(cborData.slice(8, 42)),  // 2 bytes map + 6 bytes "ipfs" for 34 bytes value
+                    solc: bytesToHex(cborData.slice(48, 51)),  // 2 bytes map + 6 bytes "solc" for 3 bytes value
+                }
+            }
+        }
+    }
+
     if ((boundaryPos > 0 && p.proxies.length === 0)) {
         // Slots could be stored outside of the program boundary and copied in
         // and we haven't found any proxy slots yet so let's check just in case...
         // This is unstructured data, so it could be anything. We can't parse it reliably.
 
         // We can skip the CBOR encoding based on length defined in the final byte
-        // https://playground.sourcify.dev/
-
-        // TODO: Pull CBOR out and add to result
-        let endBoundary : number|undefined = undefined;
-        const finalByte = code.bytecode.slice(-1)[0];
-        if (!isHalt(finalByte)) {
-            const cborLength = valueToOffset(code.bytecode.slice(-2));
-            endBoundary = -(cborLength + 4); // +4 for the length bytes
-        }
-
         const auxData = bytesToHex(code.bytecode.slice(boundaryPos, endBoundary));
         if (auxData.length >= 2 + 64) { // 0x is empty, plus at least enough for a slot
             // Look for known slots in extra data segment that could be CODECOPY'd
@@ -545,6 +565,37 @@ export function disasm(bytecode: string, config?: {onlyJumpTable: boolean}): Pro
                 if (auxData.lastIndexOf(slot.slice(2)) === -1) continue;
                 p.proxies.push(resolver);
             }
+
+            // Some proxies hash their slot pre-image at runtime rather than embedding
+            // the slot value, so the string itself is what lands in the data segment.
+            for (const [preimage, resolver] of Object.entries(slotPreimages)) {
+                if (auxData.lastIndexOf(preimage.slice(2)) === -1) continue;
+                p.proxies.push(resolver);
+            }
+        }
+    }
+
+    if (p.proxies.length === 0) {
+        // Livepeer's ManagerProxy keeps its implementation pointer in a registry
+        // contract rather than a namespaced slot, so there is no constant anywhere in
+        // the bytecode for the scans above to match. What identifies it is the
+        // dispatch table: the proxy's whole external surface is those three functions
+        // and everything else falls through to the delegatecall.
+        //
+        // This runs last, after both constant scans, so a contract that does carry a
+        // known slot is always resolved from that evidence rather than from a shape.
+        //
+        // Match the exact set, not a subset. Livepeer's target contracts inherit the
+        // same three functions, so a subset match would label every implementation a
+        // proxy as well.
+        const selectors = Object.keys(p.selectors);
+        const hasDelegateCall = Object.values(p.dests).some((fn) => fn.opTags.has(opcodes.DELEGATECALL));
+        if (
+            hasDelegateCall &&
+            selectors.length === livepeerManagerProxySelectors.length &&
+            livepeerManagerProxySelectors.every((s) => s in p.selectors)
+        ) {
+            p.proxies.push(new LivepeerManagerProxyResolver());
         }
     }
 
@@ -554,6 +605,17 @@ export function disasm(bytecode: string, config?: {onlyJumpTable: boolean}): Pro
         // Hopefully we can improve this later.
         // See: https://github.com/shazow/whatsabi/issues/171
         p.proxies = p.init.proxies;
+    }
+
+    if (
+        !(aragonAppProxyImplementationSelector in p.selectors) &&
+        p.proxies.some((r) => r instanceof AragonAppProxyResolver)
+    ) {
+        // The Aragon kernel slot is read by the apps behind the proxy as well as by
+        // the proxy itself, so on its own it would label every aragonOS app
+        // implementation a proxy. The proxy exposes ERC-897 implementation() and the
+        // app does not, so keep the match only when the dispatch table has it.
+        p.proxies = p.proxies.filter((r) => !(r instanceof AragonAppProxyResolver));
     }
 
     return p;

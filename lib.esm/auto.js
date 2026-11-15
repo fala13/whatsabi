@@ -9,6 +9,7 @@ import { MultiABILoader } from "./loaders.js";
 /// Magic number we use to determine whether a proxy is reasonably a destination contract or not.
 /// If it has many SSTORE's then it's probably doing something other than proxying.
 const PROXY_SSTORE_COUNT_MAX = 4;
+const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 function isAddress(address) {
     return address.length === 42 && address.startsWith("0x") && Number(address) >= 0;
 }
@@ -47,6 +48,9 @@ export const defaultConfig = {
  * ```
  */
 export async function autoload(address, config) {
+    return await _autoload(address, config, new Set());
+}
+async function _autoload(address, config, visitedAddresses) {
     if (config === undefined) {
         throw new errors.AutoloadError("config is undefined, must include 'provider'");
     }
@@ -79,6 +83,8 @@ export async function autoload(address, config) {
             }
         }
     }
+    const proxyPath = new Set(visitedAddresses);
+    proxyPath.add(address.toLowerCase());
     // Load code, we need to disasm to find proxies
     onProgress("getCode", { address });
     let bytecode;
@@ -116,8 +122,15 @@ export async function autoload(address, config) {
             for (const resolver of result.proxies) {
                 onProgress("followProxies", { resolver: resolver, address });
                 const resolved = await resolver.resolve(provider, address, selector);
-                if (resolved !== undefined)
-                    return await autoload(resolved, config);
+                if (resolved !== undefined && resolved !== ZERO_ADDRESS) {
+                    if (proxyPath.has(resolved.toLowerCase())) {
+                        onError("followProxies", new errors.AutoloadError(`Proxy cycle detected while resolving ${address}`, {
+                            context: { address, resolved },
+                        }));
+                        return result;
+                    }
+                    return await _autoload(resolved, config, proxyPath);
+                }
             }
             onError("followProxies", new Error("failed to resolve proxy"));
             return result;
@@ -228,7 +241,7 @@ export async function autoload(address, config) {
                 if (r.length >= 1) {
                     a.sig = r[0];
                     // Extract as much metadata as it can from the signature
-                    Object.assign(a, AbiEvent.from("function " + a.sig));
+                    Object.assign(a, AbiEvent.from("event " + a.sig, { prepare: false }));
                 }
                 if (r.length > 1)
                     a.sigAlts = r.slice(1);

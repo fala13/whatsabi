@@ -38,10 +38,24 @@ export declare class PROXIABLEProxyResolver extends BaseProxyResolver implements
     name: string;
     resolve(provider: StorageProvider, address: string): Promise<string>;
 }
+export declare class MaticProxyResolver extends BaseProxyResolver implements ProxyResolver {
+    name: string;
+    resolve(provider: StorageProvider, address: string): Promise<string>;
+}
 export declare class SequenceWalletProxyResolver extends BaseProxyResolver implements ProxyResolver {
     name: string;
     resolve(provider: StorageProvider, address: string): Promise<string>;
 }
+export declare class LivepeerManagerProxyResolver extends BaseProxyResolver implements ProxyResolver {
+    name: string;
+    resolve(provider: StorageProvider & CallProvider, address: string): Promise<string>;
+}
+export declare const livepeerManagerProxySelectors: string[];
+export declare class AragonAppProxyResolver extends BaseProxyResolver implements ProxyResolver {
+    name: string;
+    resolve(provider: CallProvider, address: string): Promise<string>;
+}
+export declare const aragonAppProxyImplementationSelector = "0x5c60da1b";
 export declare class FixedProxyResolver extends BaseProxyResolver implements ProxyResolver {
     name: string;
     readonly resolvedAddress: string;
@@ -50,3 +64,4 @@ export declare class FixedProxyResolver extends BaseProxyResolver implements Pro
 }
 export declare const slots: Record<string, string>;
 export declare const slotResolvers: Record<string, ProxyResolver>;
+export declare const slotPreimages: Record<string, ProxyResolver>;

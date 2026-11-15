@@ -109,6 +109,7 @@ class Program {
     proxies;
     isFactory;
     sstoreCount;
+    metadata;
     init;
     constructor(init) {
         this.dests = {};
@@ -217,7 +218,7 @@ function disasm(bytecode, config) {
                 if (checkJumpTable && Object.keys(p.selectors).length > 0) {
                     checkJumpTable = false;
                 }
-                if (resumeJumpTable.delete(pos)) {
+                if (resumeJumpTable.delete(pos - runtimeOffset)) {
                     checkJumpTable = code.at(pos + 1) === opcodes_js_1.opcodes.DUP1 || code.at(pos + 1) === opcodes_js_1.opcodes.CALLDATALOAD;
                 }
                 else if (!checkJumpTable && resumeJumpTable.size === 0 && onlyJumpTable) {
@@ -228,7 +229,7 @@ function disasm(bytecode, config) {
             if (code.at(pos + 1) === opcodes_js_1.opcodes.CALLVALUE &&
                 code.at(pos + 2) === opcodes_js_1.opcodes.DUP1 &&
                 code.at(pos + 3) === opcodes_js_1.opcodes.ISZERO) {
-                p.notPayable[pos] = step;
+                p.notPayable[pos - runtimeOffset] = step;
             }
             continue;
         }
@@ -241,7 +242,7 @@ function disasm(bytecode, config) {
         if (currentFunction.opTags !== undefined) {
             if ((inst === opcodes_js_1.opcodes.JUMP || inst === opcodes_js_1.opcodes.JUMPI) && (0, opcodes_js_1.isPush)(code.at(-2))) {
                 const jumpOffset = valueToOffset(code.valueAt(-2));
-                currentFunction.jumps.push(jumpOffset - runtimeOffset);
+                currentFunction.jumps.push(jumpOffset);
                 maxJumpDest = Math.max(maxJumpDest, jumpOffset);
             }
             if (interestingOpCodes.has(inst)) {
@@ -329,13 +330,25 @@ function disasm(bytecode, config) {
             continue;
         }
     }
-    if ((boundaryPos > 0 && p.proxies.length === 0)) {
-        let endBoundary = undefined;
-        const finalByte = code.bytecode.slice(-1)[0];
-        if (!(0, opcodes_js_1.isHalt)(finalByte)) {
-            const cborLength = valueToOffset(code.bytecode.slice(-2));
-            endBoundary = -(cborLength + 4);
+    let endBoundary = undefined;
+    const finalByte = code.bytecode.slice(-1)[0];
+    if (!(0, opcodes_js_1.isHalt)(finalByte) || code.bytecode.slice(-2)[0] === 0) {
+        const cborLength = valueToOffset(code.bytecode.slice(-2));
+        const metadataLength = cborLength + 2;
+        const blobStart = code.bytecode.length - metadataLength;
+        const looksLikeCBOR = blobStart >= boundaryPos && (code.bytecode[blobStart] & 0xe0) === 0xa0;
+        if (looksLikeCBOR) {
+            endBoundary = -metadataLength;
+            const cborData = code.bytecode.slice(blobStart, -2);
+            if (cborData.length === 51) {
+                p.metadata = {
+                    ipfs: (0, utils_js_1.bytesToHex)(cborData.slice(8, 42)),
+                    solc: (0, utils_js_1.bytesToHex)(cborData.slice(48, 51)),
+                };
+            }
         }
+    }
+    if ((boundaryPos > 0 && p.proxies.length === 0)) {
         const auxData = (0, utils_js_1.bytesToHex)(code.bytecode.slice(boundaryPos, endBoundary));
         if (auxData.length >= 2 + 64) {
             for (const [slot, resolver] of Object.entries(proxies_js_1.slotResolvers)) {
@@ -343,10 +356,28 @@ function disasm(bytecode, config) {
                     continue;
                 p.proxies.push(resolver);
             }
+            for (const [preimage, resolver] of Object.entries(proxies_js_1.slotPreimages)) {
+                if (auxData.lastIndexOf(preimage.slice(2)) === -1)
+                    continue;
+                p.proxies.push(resolver);
+            }
+        }
+    }
+    if (p.proxies.length === 0) {
+        const selectors = Object.keys(p.selectors);
+        const hasDelegateCall = Object.values(p.dests).some((fn) => fn.opTags.has(opcodes_js_1.opcodes.DELEGATECALL));
+        if (hasDelegateCall &&
+            selectors.length === proxies_js_1.livepeerManagerProxySelectors.length &&
+            proxies_js_1.livepeerManagerProxySelectors.every((s) => s in p.selectors)) {
+            p.proxies.push(new proxies_js_1.LivepeerManagerProxyResolver());
         }
     }
     if (p.init && p.proxies.length === 0 && p.init.proxies.length > 0) {
         p.proxies = p.init.proxies;
+    }
+    if (!(proxies_js_1.aragonAppProxyImplementationSelector in p.selectors) &&
+        p.proxies.some((r) => r instanceof proxies_js_1.AragonAppProxyResolver)) {
+        p.proxies = p.proxies.filter((r) => !(r instanceof proxies_js_1.AragonAppProxyResolver));
     }
     return p;
 }

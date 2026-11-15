@@ -335,7 +335,13 @@ class BlockscoutABILoader {
         if (this.apiKey)
             url += "?apikey=" + this.apiKey;
         try {
-            const response = await fetch(url);
+            let response = await fetch(url);
+            for (let attempt = 1; response.status === 429 && attempt <= 3; attempt++) {
+                const retryAfter = Number(response.headers.get("retry-after"));
+                const seconds = (retryAfter >= 0 && retryAfter <= 10) ? retryAfter : attempt;
+                await new Promise(resolve => setTimeout(resolve, seconds * 1000));
+                response = await fetch(url);
+            }
             if (response.status === 404)
                 return emptyContractResult;
             const responseText = await response.text();

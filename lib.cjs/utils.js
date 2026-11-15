@@ -3,9 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.FetchError = void 0;
 exports.hexToBytes = hexToBytes;
 exports.bytesToHex = bytesToHex;
-exports.keccak256 = keccak256;
 exports.fetchJSON = fetchJSON;
-exports.addressWithChecksum = addressWithChecksum;
 function hexToBytes(hex) {
     if (hex.startsWith("0x")) {
         hex = hex.slice(2);
@@ -31,16 +29,6 @@ function bytesToHex(bytes, padToBytes) {
     }
     return "0x" + hex;
 }
-const sha3_js_1 = require("@noble/hashes/sha3.js");
-function keccak256(data) {
-    if (typeof data !== "string") {
-        return bytesToHex((0, sha3_js_1.keccak_256)(data));
-    }
-    if (data.startsWith("0x")) {
-        return bytesToHex((0, sha3_js_1.keccak_256)(hexToBytes(data.slice(2))));
-    }
-    return bytesToHex((0, sha3_js_1.keccak_256)(hexToBytes(data)));
-}
 class FetchError extends Error {
     status;
     constructor(message, status) {
@@ -59,22 +47,5 @@ async function fetchJSON(url) {
         throw new FetchError(response.statusText, response.status);
     }
     return response.json();
-}
-function addressWithChecksum(address) {
-    const chars = address.toLowerCase().substring(2).split("");
-    const expanded = new Uint8Array(40);
-    for (let i = 0; i < 40; i++) {
-        expanded[i] = chars[i].charCodeAt(0);
-    }
-    const hashed = (0, sha3_js_1.keccak_256)(expanded);
-    for (let i = 0; i < 40; i += 2) {
-        if ((hashed[i >> 1] >> 4) >= 8) {
-            chars[i] = chars[i].toUpperCase();
-        }
-        if ((hashed[i >> 1] & 0x0f) >= 8) {
-            chars[i + 1] = chars[i + 1].toUpperCase();
-        }
-    }
-    return "0x" + chars.join("");
 }
 //# sourceMappingURL=utils.js.map

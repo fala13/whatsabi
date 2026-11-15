@@ -472,8 +472,9 @@ export class BlockscoutABILoader implements ABILoader {
         if (config === undefined) config = {};
         this.apiKey = config.apiKey;
         // A chainId routes through the multichain gateway, which requires an
-        // apiKey (or an x402 payment); the server enforces this. An explicit
-        // baseURL wins over chainId.
+        // apiKey (or an x402 payment); the server enforces this. Some
+        // "featured" chains (e.g. Base) also require a paid plan and respond
+        // with 402 to free-tier keys. An explicit baseURL wins over chainId.
         this.baseURL = config.baseURL ||
             (config.chainId !== undefined
                 ? `https://api.blockscout.com/${config.chainId}/api`
@@ -510,7 +511,15 @@ export class BlockscoutABILoader implements ABILoader {
         if (this.apiKey) url += "?apikey=" + this.apiKey;
 
         try {
-            const response = await fetch(url);
+            let response = await fetch(url);
+            // The gateway rate-limits per key; back off and retry a few times
+            // before giving up, respecting a sane Retry-After when present.
+            for (let attempt = 1; response.status === 429 && attempt <= 3; attempt++) {
+                const retryAfter = Number(response.headers.get("retry-after"));
+                const seconds = (retryAfter >= 0 && retryAfter <= 10) ? retryAfter : attempt;
+                await new Promise(resolve => setTimeout(resolve, seconds * 1000));
+                response = await fetch(url);
+            }
             if (response.status === 404) return emptyContractResult;
 
             const responseText = await response.text();

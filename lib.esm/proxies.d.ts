@@ -1,54 +1,3 @@
-/**
- * @module proxies
- * This module contains code to resolve a variety of types of proxies.
- *
- * The resolvers are detected and configured by whatsabi.autoload(...).
- *
- * If you already know which proxy it is and how it's configured, then the resolvers could be used manually too.
- *
- * @example
- * Using WhatsABI to only resolve proxies with a known bytecode:
- * ```ts
- * const address = "0x...";
- *
- * // Skip this and use the regular `provider` if you don't already have the bytecode or don't care about saving an RPC call. :)
- * const bytecode = "0x..."; // Already loaded from somewhere
- * const cachedCodeProvider = whatsabi.providers.WithCachedCode(provider, {
- *   [address]: bytecode,
- * });
- *
- * const result = whatsabi.autoload(address, {
- *   provider: cachedCodeProvider,
- *   abiLoader: false, // Skip ABI loaders
- *   signatureLookup: false, // Skip looking up selector signatures
- * })
- *
- * if (result.address !== address) console.log(`Resolved proxy: ${address} -> ${result.address}`);
- * if (result.proxies.length > 0) console.log("Proxies detected:", result.proxies);
- * // Note that some proxies can only be resolved relative to a selector, like DiamondProxy. These will need to be resolved manually via result.proxies.
- * ```
- *
- * @example
- * Resolve a DiamondProxy:
- * ```ts
- * // Let's say we have a result with a DiamondProxy in it, from the above example
- * const resolver = result.proxies[0] as whatsabi.proxies.DiamondProxyResolver;
- *
- * // DiamondProxies have different contracts mapped relative to the selector,
- * // so we must resolve them against a selector.
- * const selector = "0x6e9960c3";  // function getAdmin() returns (address)
- *
- * const implementationAddress = await resolver.resolve(provider, address, selector);
- * ```
- *
- * @example
- * Get all facets and selectors for a DiamondProxy:
- * ```ts
- * // Let's say we have a result with a DiamondProxy in it, from the above example
- * const diamondResolver = result.proxies[0] as DiamondProxyResolver;
- * const facets = await diamondResolver.facets(provider, address); // All possible address -> selector[] mappings
- * ```
- */
 import type { StorageProvider, CallProvider } from "./providers.js";
 export interface ProxyResolver {
     readonly name: string;
@@ -89,10 +38,24 @@ export declare class PROXIABLEProxyResolver extends BaseProxyResolver implements
     name: string;
     resolve(provider: StorageProvider, address: string): Promise<string>;
 }
+export declare class MaticProxyResolver extends BaseProxyResolver implements ProxyResolver {
+    name: string;
+    resolve(provider: StorageProvider, address: string): Promise<string>;
+}
 export declare class SequenceWalletProxyResolver extends BaseProxyResolver implements ProxyResolver {
     name: string;
     resolve(provider: StorageProvider, address: string): Promise<string>;
 }
+export declare class LivepeerManagerProxyResolver extends BaseProxyResolver implements ProxyResolver {
+    name: string;
+    resolve(provider: StorageProvider & CallProvider, address: string): Promise<string>;
+}
+export declare const livepeerManagerProxySelectors: string[];
+export declare class AragonAppProxyResolver extends BaseProxyResolver implements ProxyResolver {
+    name: string;
+    resolve(provider: CallProvider, address: string): Promise<string>;
+}
+export declare const aragonAppProxyImplementationSelector = "0x5c60da1b";
 export declare class FixedProxyResolver extends BaseProxyResolver implements ProxyResolver {
     name: string;
     readonly resolvedAddress: string;
@@ -101,3 +64,23 @@ export declare class FixedProxyResolver extends BaseProxyResolver implements Pro
 }
 export declare const slots: Record<string, string>;
 export declare const slotResolvers: Record<string, ProxyResolver>;
+/**
+ * Slot pre-images to look for in the data segment, mapped to the resolver for
+ * the slot they hash to.
+ *
+ * Normally a proxy embeds its slot as a PUSH32 constant, and we match that value
+ * directly via {@link slotResolvers}. Some proxies instead keep the pre-image
+ * string in their data segment and hash it at runtime, so the slot value never
+ * appears in the bytecode at all and there is nothing for that scan to match.
+ *
+ * This happens when the source writes the slot as an expression rather than as a
+ * hex literal, and the compiler does not fold it. Polygon's UpgradableProxy is
+ * one such contract: it declares the slot as
+ * `keccak256("matic.network.proxy.implementation")` and solc 0.6.6 inlines that
+ * expression at each use site, so the string ships and the hash is computed on
+ * every call.
+ *
+ * Keys are the hex encoding of the ASCII pre-image, so that the data segment
+ * scan in disasm can match them the same way it matches slot values.
+ */
+export declare const slotPreimages: Record<string, ProxyResolver>;

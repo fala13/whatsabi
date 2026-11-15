@@ -44,6 +44,7 @@ const loaders_js_1 = require("./loaders.js");
 const disasm_js_1 = require("./disasm.js");
 const loaders_js_2 = require("./loaders.js");
 const PROXY_SSTORE_COUNT_MAX = 4;
+const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 function isAddress(address) {
     return address.length === 42 && address.startsWith("0x") && Number(address) >= 0;
 }
@@ -52,6 +53,9 @@ exports.defaultConfig = {
     onError: (phase, err) => { console.error(phase + ":", err); return false; },
 };
 async function autoload(address, config) {
+    return await _autoload(address, config, new Set());
+}
+async function _autoload(address, config, visitedAddresses) {
     if (config === undefined) {
         throw new errors.AutoloadError("config is undefined, must include 'provider'");
     }
@@ -84,6 +88,8 @@ async function autoload(address, config) {
             }
         }
     }
+    const proxyPath = new Set(visitedAddresses);
+    proxyPath.add(address.toLowerCase());
     onProgress("getCode", { address });
     let bytecode;
     try {
@@ -115,8 +121,15 @@ async function autoload(address, config) {
             for (const resolver of result.proxies) {
                 onProgress("followProxies", { resolver: resolver, address });
                 const resolved = await resolver.resolve(provider, address, selector);
-                if (resolved !== undefined)
-                    return await autoload(resolved, config);
+                if (resolved !== undefined && resolved !== ZERO_ADDRESS) {
+                    if (proxyPath.has(resolved.toLowerCase())) {
+                        onError("followProxies", new errors.AutoloadError(`Proxy cycle detected while resolving ${address}`, {
+                            context: { address, resolved },
+                        }));
+                        return result;
+                    }
+                    return await _autoload(resolved, config, proxyPath);
+                }
             }
             onError("followProxies", new Error("failed to resolve proxy"));
             return result;
@@ -213,7 +226,7 @@ async function autoload(address, config) {
             promises.push(signatureLookup.loadEvents(a.hash).then((r) => {
                 if (r.length >= 1) {
                     a.sig = r[0];
-                    Object.assign(a, AbiEvent.from("function " + a.sig));
+                    Object.assign(a, AbiEvent.from("event " + a.sig, { prepare: false }));
                 }
                 if (r.length > 1)
                     a.sigAlts = r.slice(1);

@@ -1,15 +1,16 @@
-import { keccak256 } from "./utils.js";
+import * as Hash from 'ox/Hash';
+
 import type { StorageProvider } from "./providers.js";
 import { StorageReadError } from "./errors.js";
 
 
 export function joinSlot(parts: string[]): string {
-    return keccak256("0x" + parts.map(s => {
+    return Hash.keccak256(("0x" + parts.map(s => {
         if (s.startsWith("0x")) {
             s = s.slice(2);
         }
         return s.padStart(64, "0");
-    }).join(""))
+    }).join("")) as `0x${string}`)
 }
 
 export function addSlotOffset(slot: string, offset: number): string {
@@ -37,7 +38,8 @@ export async function readArray(provider: StorageProvider, address: string, pos:
         throw new StorageReadError(`readArray aborted: Array size ${length} exceeds safe integer range`, { context: { address, pos, width, limit } });
     }
     const num = Number(length);
-    const start = keccak256(pos.toString(16)); // toString(16) does the right thing on strings too (no-op) (:
+    const position = pos.toString(16); // toString(16) does the right thing on strings too (no-op) (:
+    const start = Hash.keccak256((position.startsWith("0x") ? position : `0x${position}`) as `0x${string}`);
     const itemsPerWord = Math.floor(32 / width);
 
     const promises : Promise<string>[] = [];

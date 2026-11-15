@@ -43,6 +43,7 @@ export declare class Program {
     proxies: Array<ProxyResolver>;
     isFactory: boolean;
     sstoreCount: number;
+    metadata?: Record<string, string>;
     init?: Program;
     constructor(init?: Program);
 }
