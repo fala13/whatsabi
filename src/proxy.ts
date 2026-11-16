@@ -71,6 +71,7 @@ async function main() {
         console.log("DELEGATECALL detected but no proxies found");
     } else {
         console.log("No DELEGATECALL detected");
+        process.exit(0);
         return;
     }
     process.exit(0);

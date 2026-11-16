@@ -59,6 +59,7 @@ async function main() {
     }
     else {
         console.log("No DELEGATECALL detected");
+        process.exit(0);
         return;
     }
     process.exit(0);
